@@ -306,8 +306,12 @@ async def list_candidates(pid: str, request: Request) -> dict:
     out_dir = _candidates_dir(request, pid)
     manifest_path = out_dir / "candidates.json"
     if not manifest_path.exists():
-        return {"candidates": []}
+        return {"candidates": [], "features": []}
     manifest = json.loads(manifest_path.read_text("utf-8"))
     for item in manifest:
         item["url"] = f"/previews/{pid}/candidates/{item['file']}"
-    return {"candidates": manifest}
+    features = []
+    summary_path = out_dir / "summary.json"
+    if summary_path.exists():
+        features = json.loads(summary_path.read_text("utf-8")).get("features", [])
+    return {"candidates": manifest, "features": features}

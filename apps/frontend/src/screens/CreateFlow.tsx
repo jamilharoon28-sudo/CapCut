@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
-  api, type Candidate, CoachError, type Readiness, type Request,
+  api, type Candidate, CoachError, type Feature, type Readiness, type Request,
   type ReviewGroup, type Slot, type Trust,
 } from "../api";
 import { PathField } from "../components/PathField";
@@ -34,6 +34,7 @@ export function CreateFlow({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState<{ title: string; body: string; detail?: string | null } | null>(null);
 
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [features, setFeatures] = useState<Feature[]>([]);
   const [selected, setSelected] = useState<string>("enhanced");
   const [savedTo, setSavedTo] = useState<string | null>(null);
   const [job, setJob] = useState<Awaited<ReturnType<typeof api.job>> | null>(null);
@@ -106,8 +107,9 @@ export function CreateFlow({ onDone }: { onDone: () => void }) {
         setJob(j);
         if (j.state === "succeeded") {
           window.clearInterval(poll.current!); poll.current = null;
-          const { candidates } = await api.candidates(pid);
+          const { candidates, features } = await api.candidates(pid);
           setCandidates(candidates);
+          setFeatures(features ?? []);
           setSelected(candidates.find((c) => c.name === "enhanced")?.name ?? candidates[0]?.name ?? "enhanced");
           await loadReviewAids(pid);
           if (autoSaved.current) setSavedTo(trust?.default_output_dir ?? "your save folder");
@@ -261,6 +263,23 @@ export function CreateFlow({ onDone }: { onDone: () => void }) {
               <p className="muted small" style={{ margin: 0 }}>{why}</p>
             </div>
 
+            {features.length > 0 && (
+              <div className="card stack">
+                <h2>What Coach did</h2>
+                <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
+                  {features.map((f) => (
+                    <li key={f.key} className="row" style={{ alignItems: "flex-start", gap: 8, padding: "4px 0" }}>
+                      <span style={{ marginTop: 2, color: `var(--${f.applied ? "success" : "warning"})` }}>
+                        <Icon name={f.applied ? "check" : "alert"} size={16} />
+                      </span>
+                      <span><strong className="small">{f.title}</strong>
+                        <span className="small muted" style={{ display: "block" }}>{f.detail}</span></span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {reviewGroups.length > 0 && (
               <div className="card stack">
                 <h2>Before you save</h2>
@@ -297,7 +316,7 @@ export function CreateFlow({ onDone }: { onDone: () => void }) {
             {savedTo && (
               <div className="pill ok"><Icon name="check" size={14} /> Saved · {savedTo}</div>
             )}
-            <Button icon="plus" onClick={() => { setPhase("form"); setCandidates([]); setSavedTo(null); setSlots([]); setReviewGroups([]); }}>
+            <Button icon="plus" onClick={() => { setPhase("form"); setCandidates([]); setSavedTo(null); setSlots([]); setReviewGroups([]); setFeatures([]); }}>
               Make another
             </Button>
             <Button variant="ghost" onClick={onDone}>Back to projects</Button>

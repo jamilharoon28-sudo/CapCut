@@ -28,7 +28,7 @@ function twoCandidates() {
   (api.candidates as ReturnType<typeof vi.fn>).mockResolvedValue({ candidates: [
     { name: "clean", file: "clean.mp4", ok: true, url: "/previews/p1/clean.mp4", detail: "ok" },
     { name: "enhanced", file: "enhanced.mp4", ok: true, url: "/previews/p1/enhanced.mp4", detail: "ok" },
-  ] });
+  ], features: [] });
 }
 
 import { api } from "../api";

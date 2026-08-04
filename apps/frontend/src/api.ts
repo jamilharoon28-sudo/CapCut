@@ -7,6 +7,7 @@ export type Project = {
 export type DoctorCheck = { ok: boolean; detail?: string; [k: string]: unknown };
 export type Candidate = { name: string; file: string; ok: boolean; url: string; detail: string;
   qc?: { code: string; severity: string; message: string }[] };
+export type Feature = { key: string; title: string; applied: boolean; detail: string };
 export type Job = { id: string; state: string; stage: string | null; percent: number | null;
   error_code?: string | null; error_detail?: string | null };
 export type Request = {
@@ -106,7 +107,8 @@ export const api = {
     }),
 
   job: (id: string) => req<Job>(`/jobs/${id}`),
-  candidates: (pid: string) => req<{ candidates: Candidate[] }>(`/projects/${pid}/candidates`),
+  candidates: (pid: string) =>
+    req<{ candidates: Candidate[]; features: Feature[] }>(`/projects/${pid}/candidates`),
   approve: (pid: string, candidate: string, destinationDir?: string, acknowledged?: string[]) =>
     req<{ approved: string; saved_to: string | null }>(`/projects/${pid}/approve`, {
       method: "POST",

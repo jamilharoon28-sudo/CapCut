@@ -292,9 +292,11 @@ def autocreate(
 
     # Understand the footage: pick each clip's best moment + subject reframe.
     analyses: dict = {}
+    cv2_ok = False
     if smart:
         from .analysis.visual import analyse_clip, cv2_available
-        if cv2_available():
+        cv2_ok = cv2_available()
+        if cv2_ok:
             for a in catalog:
                 try:
                     analyses[a.id] = analyse_clip(a.path, a.duration_us, ff)
@@ -303,10 +305,12 @@ def autocreate(
 
     plan = None
     voice_led = False
+    whisper_ok = False
     # Talking-head mode: keep good spoken lines, cut fillers; captions = real words.
     if mode in ("auto", "talking"):
         from .talking import build_talking_plan, resolve_transcriber
         transcriber = resolve_transcriber()
+        whisper_ok = transcriber is not None
         if transcriber is not None:
             plan = build_talking_plan(catalog, transcriber=transcriber, project_id=project_id,
                                       target_us=target_us, ffmpeg=ff, analyses=analyses)
@@ -339,9 +343,57 @@ def autocreate(
     _persist_edit_state(out_dir, plan, catalog, analyses,
                         music=music, logo=logo, voice_led=voice_led, target_us=target_us)
 
-    return _render_candidates(plan, asset_paths, has_audio, out_dir, ff,
-                              music=music, logo=logo, voice_led=voice_led,
-                              make_my_video=make_my_video, rotations=rotations)
+    results = _render_candidates(plan, asset_paths, has_audio, out_dir, ff,
+                                 music=music, logo=logo, voice_led=voice_led,
+                                 make_my_video=make_my_video, rotations=rotations)
+    # Honest summary of which automatic features fired and which were skipped, and
+    # how to enable the rest — so a plain montage is never a silent failure.
+    _write_pipeline_summary(
+        out_dir, results=results, smart=smart, cv2_ok=cv2_ok, visual_used=bool(analyses),
+        whisper_ok=whisper_ok, voice_led=voice_led, music=music,
+        music_auto=(music_choice is not None and getattr(music_choice, "chosen", None) is not None),
+        captions_requested=bool(captions), logo=logo)
+    return results
+
+
+def _write_pipeline_summary(out_dir: Path, *, results: list, smart: bool, cv2_ok: bool,
+                            visual_used: bool, whisper_ok: bool, voice_led: bool,
+                            music: Path | None, music_auto: bool, captions_requested: bool,
+                            logo: Path | None) -> None:
+    """Record what Coach did vs skipped (with how to enable the rest)."""
+    details = " ".join(r.detail for r in results if r.detail)
+    captions_dropped = "burned in" in details          # libass missing at render
+    audio_silenced = "silence" in details
+
+    def item(key, title, applied, detail):
+        return {"key": key, "title": title, "applied": bool(applied), "detail": detail}
+
+    items = [
+        item("edit_style", "Edit style",
+             voice_led or music is not None,
+             "Talking-head cutting" if voice_led
+             else "Beat-synced to your music" if music is not None
+             else "Simple montage — add a music track or approved music folder for beat-synced cuts"),
+        item("smart_framing", "Smart moment-picking & subject framing", visual_used,
+             "Picked each clip's best moment and reframed on the subject" if visual_used
+             else ("Visual analysis needs OpenCV — install it with the 'vision' extra"
+                   if smart and not cv2_ok else "Not applied")),
+        item("music", "Music soundtrack", music is not None,
+             ("Auto-selected from your approved music folder" if music_auto
+              else "Used your chosen track") if music is not None
+             else "No music track or approved music folder set (Coach never rips music)"),
+        item("captions", "Captions", captions_requested and not captions_dropped,
+             "Added on-screen captions" if (captions_requested and not captions_dropped)
+             else ("Your FFmpeg can't burn in captions — run: brew reinstall ffmpeg"
+                   if captions_dropped else
+                   "No script provided (type one line per shot), and speech captions need a whisper model")),
+        item("audio", "Audio", not audio_silenced,
+             "Kept clip audio, loudness-normalised" if not audio_silenced
+             else "Some clips had unreadable audio; rendered with silence"),
+        item("outro", "Branded ending", logo is not None,
+             "Added your logo outro" if logo is not None else "No logo image provided"),
+    ]
+    (out_dir / "summary.json").write_text(json.dumps({"features": items}, indent=2), "utf-8")
 
 
 def _render_candidates(
