@@ -77,28 +77,50 @@ def build_catalog(media_dir: Path, ffmpeg: str, ffprobe: str | None) -> list[Cat
     return assets
 
 
+MIN_SHOT_US = int(2.0 * SECOND_US)   # keep each shot on screen long enough to read
+MAX_SHOT_US = int(5.0 * SECOND_US)
+DEFAULT_MAX_CLIPS = 8                 # a watchable montage, not a frantic slideshow
+
+
+def _select_clips(catalog: list[CatalogAsset], max_clips: int) -> list[CatalogAsset]:
+    """Pick up to ``max_clips`` clips, evenly sampled across the folder order."""
+    if len(catalog) <= max_clips:
+        return catalog
+    n = max_clips
+    last = len(catalog) - 1
+    idxs = sorted({round(i * last / (n - 1)) for i in range(n)})
+    return [catalog[i] for i in idxs]
+
+
 def cold_start_plan(
     catalog: list[CatalogAsset],
     *,
     project_id: str,
     target_us: int = 20 * SECOND_US,
     captions: list[str] | None = None,
+    max_clips: int = DEFAULT_MAX_CLIPS,
+    per_clip_us: int | None = None,
 ) -> EditPlan:
-    """Sequence clips into a montage that lands near the target duration.
+    """Sequence clips into a watchable montage near the target duration.
 
-    Cold-start defaults (doc 16 §3): visually distinct opening, clean cuts, keep
-    each shot short. Each clip contributes one segment from just after its start.
+    Cold-start defaults (doc 16 §3): distinct opening, clean cuts, each shot on
+    screen 2–5 s. A big folder is *sampled* down to ``max_clips`` so unrelated
+    junk drawers don't produce a one-frame-per-clip flicker. Point Coach at the
+    clips for ONE video for a coherent result.
     """
     if not catalog:
         raise ValueError("no usable video clips found in the folder")
-    per_clip_us = max(int(1.5 * SECOND_US), min(int(4 * SECOND_US), target_us // len(catalog)))
+    chosen = _select_clips(catalog, max_clips)
+    if per_clip_us is None:
+        per_clip_us = max(MIN_SHOT_US, min(MAX_SHOT_US, target_us // max(1, len(chosen))))
+
     segments: list[Segment] = []
     caption_events: list[Caption] = []
     cursor = 0
-    for i, asset in enumerate(catalog):
+    for i, asset in enumerate(chosen):
         lead_in = min(int(0.3 * SECOND_US), asset.duration_us // 10)
         seg_dur = min(per_clip_us, asset.duration_us - lead_in)
-        if seg_dur <= 0:
+        if seg_dur <= 0:  # clip shorter than the lead-in: use the whole clip
             seg_dur = asset.duration_us
             lead_in = 0
         seg = Segment(
@@ -117,8 +139,6 @@ def cold_start_plan(
             caption_events.append(Caption(id=f"cap_{uuid.uuid4().hex[:12]}", text=captions[i],
                                           start_us=cursor, duration_us=seg_dur))
         cursor += seg_dur
-        if cursor >= target_us:
-            break
     return EditPlan(id=f"edit_{uuid.uuid4().hex}", project_id=project_id,
                     segments=segments, captions=caption_events)
 
@@ -138,6 +158,7 @@ def autocreate(
     project_id: str = "cli",
     target_seconds: float = 20.0,
     captions: list[str] | None = None,
+    max_clips: int = DEFAULT_MAX_CLIPS,
     ffmpeg: str | None = None,
     ffprobe: str | None = None,
 ) -> list[AutoCreateResult]:
@@ -151,7 +172,8 @@ def autocreate(
     if not catalog:
         raise RuntimeError(f"no video clips found in {media_dir}")
     plan = cold_start_plan(catalog, project_id=project_id,
-                           target_us=int(target_seconds * SECOND_US), captions=captions)
+                           target_us=int(target_seconds * SECOND_US), captions=captions,
+                           max_clips=max_clips)
     asset_paths = {a.id: a.path for a in catalog}
     has_audio = {a.id: a.has_audio for a in catalog}
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -173,9 +195,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("media_dir", type=Path)
     ap.add_argument("--out", type=Path, default=Path("./coach-candidates"))
     ap.add_argument("--seconds", type=float, default=20.0)
+    ap.add_argument("--max-clips", type=int, default=DEFAULT_MAX_CLIPS,
+                    help="most shots to include (default 8)")
     args = ap.parse_args(argv)
     try:
-        results = autocreate(args.media_dir, args.out, target_seconds=args.seconds)
+        results = autocreate(args.media_dir, args.out, target_seconds=args.seconds,
+                             max_clips=args.max_clips)
     except (RuntimeError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2

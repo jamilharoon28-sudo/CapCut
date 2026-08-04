@@ -5,14 +5,17 @@ import { Loading, StateCard } from "../components/States";
 
 type Phase = "form" | "rendering" | "review" | "error";
 
-// Automation-first flow (pack docs 15–16): point Coach at a folder of clips and
-// it renders Clean / Enhanced / Bold candidates you can play — no CapCut needed.
+// Automation-first flow (pack docs 15–16): point Coach at a folder of clips for
+// ONE video and it renders Clean / Enhanced / Bold candidates you can play — no
+// CapCut needed. Your originals are never changed.
 export function CreateVideo() {
   const [phase, setPhase] = useState<Phase>("form");
   const [folder, setFolder] = useState("");
   const [seconds, setSeconds] = useState(20);
+  const [maxClips, setMaxClips] = useState(8);
   const [captions, setCaptions] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [chosen, setChosen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [stage, setStage] = useState("Starting…");
   const pollRef = useRef<number | null>(null);
@@ -26,7 +29,7 @@ export function CreateVideo() {
       const project = await api.createProject("New video");
       const capLines = captions.split("\n").map((s) => s.trim()).filter(Boolean);
       const { job_id } = await api.autocreate(
-        project.id, folder.trim(), seconds, capLines.length ? capLines : undefined,
+        project.id, folder.trim(), seconds, capLines.length ? capLines : undefined, maxClips,
       );
       setPhase("rendering");
       setStage("Coach is building three edits…");
@@ -40,7 +43,7 @@ export function CreateVideo() {
           setPhase("review");
         } else if (job.state === "failed") {
           window.clearInterval(pollRef.current!);
-          setError("Rendering failed. Check that the folder has video clips and FFmpeg is installed.");
+          setError("Rendering failed. Check that the folder has video clips Coach can read.");
           setPhase("error");
         }
       }, 1000);
@@ -50,31 +53,74 @@ export function CreateVideo() {
     }
   }
 
-  if (phase === "rendering") return <Loading stage={stage} />;
+  if (phase === "rendering")
+    return (
+      <section>
+        <h1>Making your video</h1>
+        <Loading stage={stage} />
+        <p className="muted" style={{ marginTop: 12 }}>
+          Coach is rendering three versions locally. This usually takes under a minute for a short
+          reel. You can leave this screen — the work keeps going.
+        </p>
+      </section>
+    );
 
   if (phase === "review")
     return (
       <section>
         <h1>Your edits are ready</h1>
-        <p className="muted">Play each one. Pick a favourite — Coach learns from your choice.</p>
+        <p className="muted">
+          Play each one and pick a favourite. <strong>Enhanced</strong> is Coach's recommendation.
+        </p>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          {candidates.map((c) => (
-            <figure key={c.name} className="card" style={{ margin: 0, width: 260 }}>
-              <video
-                src={c.url}
-                controls
-                playsInline
-                style={{ width: "100%", borderRadius: 12, background: "var(--canvas)", aspectRatio: "9 / 16" }}
-              />
-              <figcaption style={{ marginTop: 8, textTransform: "capitalize", fontWeight: 600 }}>
-                {c.name}
-                {c.name === "enhanced" && <span className="badge" style={{ marginLeft: 8 }}>Recommended</span>}
-              </figcaption>
-            </figure>
-          ))}
+          {candidates.map((c) => {
+            const selected = chosen === c.name;
+            return (
+              <figure
+                key={c.name}
+                className="card"
+                style={{
+                  margin: 0, width: 260,
+                  outline: selected ? "3px solid var(--accent)" : "none",
+                  outlineOffset: 2,
+                }}
+              >
+                <video
+                  src={c.url}
+                  controls
+                  playsInline
+                  style={{ width: "100%", borderRadius: 12, background: "var(--canvas)",
+                           aspectRatio: "9 / 16" }}
+                />
+                <figcaption style={{ marginTop: 8, display: "flex", justifyContent: "space-between",
+                                     alignItems: "center" }}>
+                  <span style={{ textTransform: "capitalize", fontWeight: 600 }}>
+                    {c.name}
+                    {c.name === "enhanced" &&
+                      <span className="badge" style={{ marginLeft: 8 }}>Recommended</span>}
+                  </span>
+                  <button
+                    className={selected ? "primary" : ""}
+                    style={{ minHeight: 36, padding: "0 12px" }}
+                    onClick={() => setChosen(c.name)}
+                  >
+                    {selected ? "Picked ✓" : "Use this"}
+                  </button>
+                </figcaption>
+              </figure>
+            );
+          })}
         </div>
-        <div style={{ marginTop: 20 }}>
-          <button onClick={() => { setPhase("form"); setCandidates([]); }}>Make another</button>
+        {chosen && (
+          <p className="muted" style={{ marginTop: 16 }}>
+            Saved on your Mac under <code>~/Library/Application Support/CapCut Coach</code>. You can
+            open your pick in CapCut Free for final touches, or share the MP4 as-is.
+          </p>
+        )}
+        <div style={{ marginTop: 20, display: "flex", gap: 12 }}>
+          <button onClick={() => { setPhase("form"); setCandidates([]); setChosen(null); }}>
+            Make another
+          </button>
         </div>
       </section>
     );
@@ -83,25 +129,27 @@ export function CreateVideo() {
     <section>
       <h1>Create a video</h1>
       <p className="muted">
-        Coach turns a folder of raw clips into three finished vertical videos. Your originals are
-        never changed, and this works without CapCut.
+        Coach turns the clips for <strong>one</strong> video into three finished vertical edits.
+        Your originals are never changed, and this works without CapCut.
       </p>
       {error && (
         <div style={{ marginBottom: 12 }}>
           <StateCard icon="⚠️" tone="danger" title="Couldn't start" detail={error} />
         </div>
       )}
-      <div className="card" style={{ display: "grid", gap: 16, maxWidth: 560 }}>
+      <div className="card" style={{ display: "grid", gap: 18, maxWidth: 560 }}>
         <label style={{ display: "grid", gap: 6 }}>
-          <span>Folder of video clips</span>
+          <span>Folder with this video's clips</span>
           <input
             value={folder}
             onChange={(e) => setFolder(e.target.value)}
-            placeholder="/Users/you/Movies/raw-footage"
-            style={{ minHeight: 44, borderRadius: 12, border: "1px solid var(--hairline)", padding: "0 12px" }}
+            placeholder="/Users/you/Movies/project-raw-footage"
+            style={{ minHeight: 44, borderRadius: 12, border: "1px solid var(--hairline)",
+                     padding: "0 12px" }}
           />
           <span className="muted" style={{ fontSize: 13 }}>
-            Tip: in Finder, right-click the folder → Copy as Pathname, then paste here.
+            In Finder, right-click the folder → <strong>Copy as Pathname</strong>, then paste here.
+            Use a folder for one video — not your whole Downloads.
           </span>
         </label>
         <label style={{ display: "grid", gap: 6 }}>
@@ -110,13 +158,22 @@ export function CreateVideo() {
                  onChange={(e) => setSeconds(Number(e.target.value))} />
         </label>
         <label style={{ display: "grid", gap: 6 }}>
+          <span>Most shots to include: {maxClips}</span>
+          <input type="range" min={3} max={16} value={maxClips}
+                 onChange={(e) => setMaxClips(Number(e.target.value))} />
+          <span className="muted" style={{ fontSize: 13 }}>
+            Fewer shots = each stays on screen longer.
+          </span>
+        </label>
+        <label style={{ display: "grid", gap: 6 }}>
           <span>On-screen captions (optional — one line per shot)</span>
           <textarea
             value={captions}
             onChange={(e) => setCaptions(e.target.value)}
             rows={3}
             placeholder={"Struggling with dry skin?\nStep one: cleanse\nBook today"}
-            style={{ borderRadius: 12, border: "1px solid var(--hairline)", padding: 10, font: "inherit" }}
+            style={{ borderRadius: 12, border: "1px solid var(--hairline)", padding: 10,
+                     font: "inherit" }}
           />
         </label>
         <div>
