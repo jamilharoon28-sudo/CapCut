@@ -126,6 +126,30 @@ def test_render_falls_back_to_silence_on_audio_stream_error(monkeypatch, tmp_pat
     assert calls == [[True], [False]]  # retried with clip audio silenced
 
 
+def test_render_falls_back_by_dropping_captions(monkeypatch, tmp_path):
+    from capcut_coach.render import renderer
+    from capcut_coach.render.graph import ENHANCED, RenderClip, RenderGraph, RenderCaption
+    from capcut_coach.schemas.edit_plan import Canvas
+
+    notes_seen: list[bool] = []
+
+    def fake_run_once(graph, out, ff, timeout):
+        # Fails while captions are present (ass/libass), succeeds once dropped.
+        if graph.captions:
+            return 1, "Error parsing filterchain '[vc]ass=... matches no filter", ["ffmpeg"]
+        notes_seen.append(True)
+        return 0, "", ["ffmpeg"]
+
+    monkeypatch.setattr(renderer, "_run_once", fake_run_once)
+    monkeypatch.setattr(renderer, "_resolve_ffmpeg", lambda f: "ffmpeg")
+    clip = RenderClip(asset_path=tmp_path / "a.mp4", source_start_us=0,
+                      source_duration_us=2_000_000, timeline_start_us=0, has_audio=False)
+    graph = RenderGraph(schema_version=1, canvas=Canvas(), clips=[clip], style=ENHANCED,
+                        captions=[RenderCaption(text="Hi", start_us=0, duration_us=2_000_000)])
+    res = renderer.render_graph(graph, tmp_path / "o.mp4")
+    assert res.returncode == 0 and "aptions couldn't be burned" in res.notes
+
+
 def test_error_summary_compresses_embedded_graph():
     from capcut_coach.render.renderer import _summarise_error
 

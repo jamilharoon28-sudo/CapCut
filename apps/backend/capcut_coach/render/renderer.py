@@ -271,6 +271,37 @@ def _run_once(graph: RenderGraph, output_path: Path, ff: str,
     return proc.returncode, proc.stderr, cmd
 
 
+def _degradations(graph: RenderGraph):
+    """Yield (graph, note) fallbacks from full fidelity to most robust.
+
+    Real-world footage / FFmpeg builds fail in two independent ways: the caption
+    burn-in (``ass``/libass) can be missing or rejected, and a clip's audio stream
+    can be unmappable. We try dropping only what's broken, preserving the rest, so
+    the owner always gets a finished video and is told what had to be dropped.
+    """
+    import copy
+
+    has_caps = bool(graph.captions) and graph.style.captions
+    has_clip_audio = graph.music_path is None and any(c.has_audio for c in graph.clips)
+
+    yield graph, ""
+    if has_caps:  # captions broken, audio fine
+        g = copy.deepcopy(graph)
+        g.captions = []
+        yield g, "Captions couldn't be burned in (your FFmpeg lacks subtitle support)."
+    if has_clip_audio:  # audio broken, captions fine
+        g = copy.deepcopy(graph)
+        for c in g.clips:
+            c.has_audio = False
+        yield g, "Some clips had unreadable audio; rendered with silence."
+    if has_caps and has_clip_audio:  # both broken
+        g = copy.deepcopy(graph)
+        g.captions = []
+        for c in g.clips:
+            c.has_audio = False
+        yield g, "Captions and some audio couldn't be used."
+
+
 def render_graph(
     graph: RenderGraph,
     output_path: Path,
@@ -278,35 +309,22 @@ def render_graph(
     ffmpeg: str | None = None,
     timeout: float = 1800.0,
 ) -> RenderResult:
-    """Render a graph to an MP4, with an automatic silent-audio fallback.
+    """Render a graph to an MP4 with a graceful-degradation fallback cascade.
 
-    Real-world footage sometimes carries an audio stream the graph can't map
-    (channel-less/data streams → "matches no streams"). Rather than fail the whole
-    video, if the first attempt fails and any clip contributed audio, retry once
-    with clip audio replaced by silence. A finished (if silent) video beats none;
-    the substitution is reported in ``notes`` so it is never hidden.
+    The first attempt is full fidelity. If it fails, Coach retries dropping only
+    the broken part (captions, then audio, then both) so a finished video is
+    produced whenever any variant can render. What was dropped is reported in
+    ``notes`` — never hidden. Only the last error is surfaced if all variants fail.
     """
-    import copy
-
     ff = _resolve_ffmpeg(ffmpeg)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    rc, stderr, cmd = _run_once(graph, output_path, ff, timeout)
-    if rc == 0:
-        return RenderResult(output_path, cmd, graph.total_us, rc)
+    last_rc, last_stderr, last_cmd = 1, "", [ff]
+    for variant, note in _degradations(graph):
+        rc, stderr, cmd = _run_once(variant, output_path, ff, timeout)
+        if rc == 0:
+            return RenderResult(output_path, cmd, variant.total_us, rc, notes=note)
+        last_rc, last_stderr, last_cmd = rc, stderr, cmd
 
-    # Fallback: silence the clip audio (unless a music bed already replaces it).
-    if graph.music_path is None and any(c.has_audio for c in graph.clips):
-        safe = copy.deepcopy(graph)
-        for c in safe.clips:
-            c.has_audio = False
-        rc2, stderr2, cmd2 = _run_once(safe, output_path, ff, timeout)
-        if rc2 == 0:
-            return RenderResult(
-                output_path, cmd2, safe.total_us, rc2,
-                notes="Some clips had unreadable audio; rendered with silence.")
-        return RenderResult(output_path, cmd2, graph.total_us, rc2,
-                            stderr_tail=_summarise_error(stderr2))
-
-    return RenderResult(output_path, cmd, graph.total_us, rc,
-                        stderr_tail=_summarise_error(stderr))
+    return RenderResult(output_path, last_cmd, graph.total_us, last_rc,
+                        stderr_tail=_summarise_error(last_stderr))
