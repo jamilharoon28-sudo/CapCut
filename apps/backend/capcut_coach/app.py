@@ -83,7 +83,30 @@ def create_app(layout: StorageLayout | None = None) -> FastAPI:
     app.include_router(system_router.router, prefix="/api/v1", dependencies=guard)
     app.include_router(projects_router.router, prefix="/api/v1", dependencies=guard)
     app.include_router(jobs_router.router, prefix="/api/v1", dependencies=guard)
+
+    # Serve the built React UI so the .app is a single process on one origin.
+    # (In dev, Vite serves the UI instead and proxies /api here.) The API stays
+    # bearer-guarded; the static UI is same-origin and injected with the token by
+    # the native shell, so no secret is exposed over HTTP.
+    _mount_frontend(app)
     return app
+
+
+def _mount_frontend(app: FastAPI) -> None:
+    import os
+    from pathlib import Path
+
+    from fastapi.staticfiles import StaticFiles
+
+    env_dist = os.environ.get("COACH_FRONTEND_DIST")
+    candidates = [Path(env_dist)] if env_dist else []
+    # Repo-relative build output, and a copy bundled inside the .app resources.
+    here = Path(__file__).resolve()
+    candidates.append(here.parents[2] / "frontend" / "dist")
+    for dist in candidates:
+        if dist.is_dir() and (dist / "index.html").exists():
+            app.mount("/", StaticFiles(directory=str(dist), html=True), name="ui")
+            return
 
 
 def run() -> None:  # pragma: no cover - entry point

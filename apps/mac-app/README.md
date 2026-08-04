@@ -1,30 +1,31 @@
-# CapCut Coach.app shell (macOS only)
+# CapCut Coach.app (macOS)
 
-The normal user launches a native `CapCut Coach.app` — a thin Swift + `WKWebView`
-shell around the local React UI and FastAPI service (design system §2). The shell
-owns:
+A native launcher: a thin AppKit + `WKWebView` window (`Sources/main.swift`) that
+starts the local FastAPI backend on a free loopback port, waits for health,
+injects the per-install bearer token as `window.__COACH_TOKEN__`, and shows the
+bundled React UI. One process, one origin, no Terminal after the first build.
 
-- native folder/file pickers and security-scoped bookmarks;
-- Keychain storage for the loopback bearer token;
-- process detection and CapCut version reads (delegated to `apps/mac-bridge`);
-- Accessibility permission prompts and user-triggered screenshots;
-- user notifications.
+## Build it (on the Mac)
 
-A browser at `http://127.0.0.1:<port>` is the **recovery fallback**.
-
-## Status
-
-⛔ **BLOCKED BY EVIDENCE** in this Linux CI scaffold — an Xcode/Swift app target
-cannot be built or run here. The shell is a small wrapper; the substantive logic
-lives in `apps/backend`, `apps/frontend`, and the read-only `apps/mac-bridge`
-(whose Swift source is authored). Build the shell on the target Mac as the final
-packaging step (Phase 10).
-
-## Shape (to implement on macOS)
-
+```bash
+./scripts/bootstrap.command       # once: installs backend + UI deps
+./scripts/build-macos-app.sh      # produces ./dist/CapCut Coach.app
+open "dist/CapCut Coach.app"      # or drag it into /Applications
 ```
-CapCutCoachApp (SwiftUI)
- └─ WKWebView → loads http://127.0.0.1:<port> after starting the launchd service
- └─ injects window.__COACH_TOKEN__ from Keychain
- └─ bridges native pickers / notifications to the web layer via WKScriptMessageHandler
-```
+
+`build-macos-app.sh` builds the UI (`pnpm build`), assembles the `.app` bundle
+with the built UI in `Resources/ui`, writes a `launch.json` with this Mac's
+absolute backend/venv paths, compiles the Swift launcher with `swiftc`, and
+ad-hoc-signs it so Gatekeeper allows your own local build.
+
+## Why a launcher (not an embedded Python)
+
+For a personal, single-user tool the app launches the backend from the repo's
+`.venv` via absolute paths baked into `launch.json` at build time — robust and
+simple, no fragile relocatable-venv or notarization dance. The browser at
+`http://127.0.0.1:<port>` remains the recovery fallback.
+
+## Not built in CI
+
+This target needs `swiftc` + Xcode CLT and only builds on macOS. The Swift source
+is authored and reviewed; compile it on the Mac with the script above.
