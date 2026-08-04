@@ -12,10 +12,27 @@ still renders.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+# Lines that carry FFmpeg's actual reason for failing (as opposed to the echoed
+# filter graph). We surface these so a failure is diagnosable, not a wall of graph.
+_ERROR_SIGNALS = re.compile(
+    r"(error|invalid|unable|failed|no such|matches no streams|does not|cannot|"
+    r"not found|conversion failed|permission denied|moov atom|decoder)", re.IGNORECASE)
+
+
+def _summarise_error(stderr: str) -> str:
+    """Pull the meaningful error lines out of FFmpeg stderr for the user/logs."""
+    lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
+    signal = [ln for ln in lines if _ERROR_SIGNALS.search(ln)]
+    # Prefer the specific error lines; fall back to the final lines of output.
+    chosen = signal[-6:] if signal else lines[-6:]
+    text = "\n".join(chosen)
+    return text[-800:]
 
 from .ass import build_ass
 from .graph import RenderGraph
@@ -212,11 +229,16 @@ def build_command(
 
     filter_complex = ";".join(filters)
     return [
-        ffmpeg, "-y", "-hide_banner", *inputs,
+        ffmpeg, "-y", "-hide_banner",
+        # Regenerate presentation timestamps: odd/variable-frame-rate containers
+        # (some phone .mov, .mts, .webm) can carry timestamps that break concat.
+        "-fflags", "+genpts",
+        *inputs,
         "-filter_complex", filter_complex,
         "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
+        "-max_muxing_queue_size", "1024",
         str(output_path),
     ]
 
@@ -250,5 +272,5 @@ def render_graph(
         command=cmd,
         duration_us=graph.total_us,
         returncode=proc.returncode,
-        stderr_tail=proc.stderr.strip()[-500:] if proc.returncode else "",
+        stderr_tail=_summarise_error(proc.stderr) if proc.returncode else "",
     )
