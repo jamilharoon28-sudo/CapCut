@@ -71,6 +71,35 @@ def test_empty_graph_refused(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_autocreate_from_zip_with_nested_folder(tmp_path):
+    """A .zip of clips (macOS-style: top folder + __MACOSX) renders 3 candidates."""
+    import subprocess
+    import zipfile
+
+    from capcut_coach.autocreate import autocreate
+
+    ff = shutil.which("ffmpeg")
+    src = tmp_path / "raw videos"
+    src.mkdir()
+    for i in range(3):
+        subprocess.run(
+            [ff, "-y", "-hide_banner", "-loglevel", "error",
+             "-f", "lavfi", "-i", "testsrc=size=640x360:rate=30:duration=3",
+             "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+             "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-shortest", str(src / f"clip{i}.mp4")], check=True)
+    zip_path = tmp_path / "raw videos.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        for p in src.iterdir():
+            zf.write(p, f"raw videos/{p.name}")
+        zf.writestr("__MACOSX/._junk", "x")  # AppleDouble noise must be ignored
+
+    results = autocreate(zip_path, tmp_path / "out", target_seconds=9, max_clips=3)
+    assert {r.candidate_name for r in results} == {"clean", "enhanced", "bold"}
+    assert all(r.ok for r in results)
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 def test_real_render_smoke(tmp_path):
     """End-to-end: synthesize two clips, render Clean, assert a playable file."""
     import subprocess

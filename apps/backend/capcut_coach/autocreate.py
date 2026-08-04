@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 import uuid
@@ -68,13 +69,49 @@ def _probe(path: Path, ffmpeg: str, ffprobe: str | None) -> tuple[int, bool]:
 
 def build_catalog(media_dir: Path, ffmpeg: str, ffprobe: str | None) -> list[CatalogAsset]:
     assets: list[CatalogAsset] = []
-    for path in sorted(media_dir.iterdir()):
-        if path.suffix.lower() in VIDEO_EXTS and path.is_file():
-            dur_us, has_audio = _probe(path, ffmpeg, ffprobe)
-            if dur_us > 0:
-                assets.append(CatalogAsset(id=f"asset_{len(assets)}", path=path,
-                                           duration_us=dur_us, has_audio=has_audio))
+    # Recurse so clips inside subfolders (common after unzipping) are found; skip
+    # macOS AppleDouble/resource files (._name) and __MACOSX metadata folders.
+    for path in sorted(media_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in VIDEO_EXTS:
+            continue
+        if path.name.startswith("._") or "__MACOSX" in path.parts:
+            continue
+        dur_us, has_audio = _probe(path, ffmpeg, ffprobe)
+        if dur_us > 0:
+            assets.append(CatalogAsset(id=f"asset_{len(assets)}", path=path,
+                                       duration_us=dur_us, has_audio=has_audio))
     return assets
+
+
+def _extract_zip_of_media(zip_path: Path) -> Path:
+    """Safely extract a .zip of clips to a sibling folder; return that folder.
+
+    Blocks path traversal, absolute paths, and symlink entries. No size cap (the
+    owner's own footage), but nothing is written outside the destination.
+    """
+    import zipfile
+
+    dest = zip_path.with_suffix("")
+    dest.mkdir(parents=True, exist_ok=True)
+    dest_resolved = dest.resolve()
+    with zipfile.ZipFile(zip_path) as zf:
+        for info in zf.infolist():
+            name = info.filename
+            if name.endswith("/") or name.startswith("__MACOSX") or Path(name).name.startswith("._"):
+                continue
+            if name.startswith("/") or ".." in Path(name).parts:
+                raise RuntimeError(f"unsafe path in archive: {name!r}")
+            if ((info.external_attr >> 16) & 0o170000) == 0o120000:
+                raise RuntimeError(f"symlink entry refused: {name!r}")
+            target = (dest / name).resolve()
+            if dest_resolved not in target.parents and target != dest_resolved:
+                raise RuntimeError(f"path escapes destination: {name!r}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info) as src, open(target, "wb") as out:
+                shutil.copyfileobj(src, out, length=1024 * 1024)
+    return dest
 
 
 MIN_SHOT_US = int(2.0 * SECOND_US)   # keep each shot on screen long enough to read
@@ -168,6 +205,9 @@ def autocreate(
     if not ff:
         raise RuntimeError("ffmpeg not found; install it (brew install ffmpeg)")
     fp = ffprobe or ffprobe_path()
+    # Accept a .zip of clips directly: extract it safely, then use that folder.
+    if media_dir.is_file() and media_dir.suffix.lower() == ".zip":
+        media_dir = _extract_zip_of_media(media_dir)
     catalog = build_catalog(media_dir, ff, fp)
     if not catalog:
         raise RuntimeError(f"no video clips found in {media_dir}")
