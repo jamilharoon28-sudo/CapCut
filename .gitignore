@@ -59,6 +59,11 @@ apps/mac-bridge/.build/
 apps/mac-bridge/*.xcodeproj/xcuserdata/
 DerivedData/
 
+# --- Human Judgement Engine private evaluation (never commit real media/paths) ---
+*.local.json
+docs/eval/*.local.*
+eval-manifest*.json
+
 # --- OS / editor ---
 .DS_Store
 .idea/

@@ -38,6 +38,35 @@ status. Direct writes never become the only path.
 CapCut version/build/schema that passed the ten-run canary + restore test. Any
 CapCut update drops the effective status to `CANARY_REQUIRED` or safer.
 
+## ADR-0007 — Layered Human Judgement Engine, not one giant model
+**Context.** Closing the human-editor gap (shot choice, story fit, continuity,
+finished-edit critique) while staying private, local, free and safe. No single
+open-source repo reliably turns raw footage + a script into a judged final edit.
+**Decision.** Build a layered engine under `capcut_coach/judgement/` with three
+intelligence levels: **A** deterministic (FFmpeg/PySceneDetect/OpenCV/Apple
+Vision/whisper.cpp/librosa + rule-based story & QC) that is *always* available;
+**B** an optional local VLM (MLX-VLM, 4-bit Qwen3-VL 2B) run only on shortlisted
+proxy windows, behind capability/thermal/memory detection; **C** a small,
+interpretable learned preference ranker over extracted features. Evidence carries
+provenance and versioning; the existing RenderGraph stays the render source of
+truth. Each phase (0–8) passes acceptance gates on real paired footage before the
+next begins; Level A is the permanent fallback.
+**Why.** Predictable fallbacks, reviewable decisions, no dependence on a heavy
+model, and honest, measurable progress instead of one unreviewable rewrite.
+**Status.** Phase 0 (baseline harness + versioned schemas + calibration/story/
+confidence foundations) implemented and unit-tested. Phases 1–8 are **BLOCKED BY
+EVIDENCE** (need FFmpeg + macOS + real footage on the owner's M2).
+
+## ADR-0008 — Optional local VLM is advisory evidence, gated and reversible
+**Decision.** The Level-B vision-language model is installed only after a memory/
+disk/thermal benchmark, is pinned + checksummed, runs strict-JSON (closed schema)
+over shortlisted proxy windows only, and is **advisory**: it may nudge ranking but
+can never override a technical blocker, invent factual/advertising claims, or run
+when memory pressure / serious thermal state is detected (it is unloaded before
+final FFmpeg rendering on low-memory Macs).
+**Why.** Keeps the app functional and safe when the model is absent or the machine
+is constrained; prevents hallucinated copy from reaching a finished video.
+
 ## ADR-0007 — AXUIElement-first automation, not coordinate clicking
 **Decision.** Guided/automated steps resolve controls by Accessibility role /
 identifier / title before any coordinates. Unknown state pauses and asks; it
