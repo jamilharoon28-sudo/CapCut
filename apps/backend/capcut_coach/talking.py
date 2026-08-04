@@ -25,15 +25,38 @@ SECOND_US = 1_000_000
 
 
 def resolve_transcriber() -> WhisperCppTranscriber | None:
-    """Locate a whisper.cpp binary + verified model, or return None."""
+    """Locate a whisper.cpp binary + verified model, or return None.
+
+    The binary is found from (in order): COACH_WHISPER, PATH/Homebrew, or —
+    most reliably — *derived from the model path* (…/whisper.cpp/models/*.bin ->
+    …/whisper.cpp/build/bin/whisper-cli). The derivation means talking-head mode
+    works even when the models dir isn't on the app's PATH.
+    """
     from .toolpaths import resolve
 
-    binary = resolve("whisper-cli", "COACH_WHISPER") or resolve("whisper.cpp") or resolve("main")
     model_path = os.environ.get("COACH_WHISPER_MODEL")
     if not model_path:
         return None
     model_file = Path(model_path)
-    if not binary or not model_file.exists():
+    if not model_file.exists():
+        return None
+
+    candidates: list[str] = []
+    if os.environ.get("COACH_WHISPER"):
+        candidates.append(os.environ["COACH_WHISPER"])
+    for name in ("whisper-cli", "whisper.cpp", "main"):
+        found = resolve(name)
+        if found:
+            candidates.append(found)
+    # Derive from the whisper.cpp checkout that holds the model.
+    for ancestor in model_file.parents:
+        if ancestor.name == "whisper.cpp":
+            for rel in ("build/bin/whisper-cli", "build/bin/main", "whisper-cli", "main"):
+                candidates.append(str(ancestor / rel))
+            break
+
+    binary = next((c for c in candidates if c and Path(c).exists()), None)
+    if not binary:
         return None
     t = WhisperCppTranscriber(binary=binary, model=WhisperModel(name=model_file.stem,
                                                                 path=model_file))
