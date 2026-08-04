@@ -25,14 +25,23 @@ _ERROR_SIGNALS = re.compile(
     r"not found|conversion failed|permission denied|moov atom|decoder)", re.IGNORECASE)
 
 
+def _compress(line: str, limit: int = 220) -> str:
+    """Collapse a mega-line (FFmpeg embeds the whole filter graph in some errors)
+    to its readable head and tail so the actual message survives."""
+    if len(line) <= limit:
+        return line
+    head, tail = limit * 2 // 3, limit // 3
+    return f"{line[:head]} …[graph elided]… {line[-tail:]}"
+
+
 def _summarise_error(stderr: str) -> str:
     """Pull the meaningful error lines out of FFmpeg stderr for the user/logs."""
     lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
     signal = [ln for ln in lines if _ERROR_SIGNALS.search(ln)]
     # Prefer the specific error lines; fall back to the final lines of output.
     chosen = signal[-6:] if signal else lines[-6:]
-    text = "\n".join(chosen)
-    return text[-800:]
+    text = "\n".join(_compress(ln) for ln in chosen)
+    return text[-900:]
 
 from .ass import build_ass
 from .graph import RenderGraph
@@ -49,6 +58,7 @@ class RenderResult:
     duration_us: int
     returncode: int
     stderr_tail: str = ""
+    notes: str = ""
 
 
 def _resolve_ffmpeg(ffmpeg: str | None) -> str:
@@ -243,6 +253,24 @@ def build_command(
     ]
 
 
+def _run_once(graph: RenderGraph, output_path: Path, ff: str,
+              timeout: float) -> tuple[int, str, list[str]]:
+    """Build + execute one render attempt. Returns (returncode, stderr, cmd)."""
+    ass_path: Path | None = None
+    tmpdir: tempfile.TemporaryDirectory | None = None
+    if graph.captions and graph.style.captions:
+        tmpdir = tempfile.TemporaryDirectory()
+        ass_path = Path(tmpdir.name) / "captions.ass"
+        ass_path.write_text(build_ass(graph.captions, graph.canvas, graph.style), "utf-8")
+    cmd = build_command(graph, output_path, ass_path=ass_path, ffmpeg=ff)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+    finally:
+        if tmpdir is not None:
+            tmpdir.cleanup()
+    return proc.returncode, proc.stderr, cmd
+
+
 def render_graph(
     graph: RenderGraph,
     output_path: Path,
@@ -250,27 +278,35 @@ def render_graph(
     ffmpeg: str | None = None,
     timeout: float = 1800.0,
 ) -> RenderResult:
-    """Render a graph to an MP4. Writes ASS captions to a temp file if present."""
+    """Render a graph to an MP4, with an automatic silent-audio fallback.
+
+    Real-world footage sometimes carries an audio stream the graph can't map
+    (channel-less/data streams → "matches no streams"). Rather than fail the whole
+    video, if the first attempt fails and any clip contributed audio, retry once
+    with clip audio replaced by silence. A finished (if silent) video beats none;
+    the substitution is reported in ``notes`` so it is never hidden.
+    """
+    import copy
+
     ff = _resolve_ffmpeg(ffmpeg)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    ass_path: Path | None = None
-    tmpdir: tempfile.TemporaryDirectory | None = None
-    if graph.captions and graph.style.captions:
-        tmpdir = tempfile.TemporaryDirectory()
-        ass_path = Path(tmpdir.name) / "captions.ass"
-        ass_path.write_text(build_ass(graph.captions, graph.canvas, graph.style), "utf-8")
+    rc, stderr, cmd = _run_once(graph, output_path, ff, timeout)
+    if rc == 0:
+        return RenderResult(output_path, cmd, graph.total_us, rc)
 
-    cmd = build_command(graph, output_path, ass_path=ass_path, ffmpeg=ff)
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
-    finally:
-        if tmpdir is not None:
-            tmpdir.cleanup()
-    return RenderResult(
-        output_path=output_path,
-        command=cmd,
-        duration_us=graph.total_us,
-        returncode=proc.returncode,
-        stderr_tail=_summarise_error(proc.stderr) if proc.returncode else "",
-    )
+    # Fallback: silence the clip audio (unless a music bed already replaces it).
+    if graph.music_path is None and any(c.has_audio for c in graph.clips):
+        safe = copy.deepcopy(graph)
+        for c in safe.clips:
+            c.has_audio = False
+        rc2, stderr2, cmd2 = _run_once(safe, output_path, ff, timeout)
+        if rc2 == 0:
+            return RenderResult(
+                output_path, cmd2, safe.total_us, rc2,
+                notes="Some clips had unreadable audio; rendered with silence.")
+        return RenderResult(output_path, cmd2, graph.total_us, rc2,
+                            stderr_tail=_summarise_error(stderr2))
+
+    return RenderResult(output_path, cmd, graph.total_us, rc,
+                        stderr_tail=_summarise_error(stderr))

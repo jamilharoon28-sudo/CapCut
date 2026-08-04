@@ -103,6 +103,37 @@ def test_empty_graph_refused(tmp_path):
         build_command(graph, tmp_path / "o.mp4", ass_path=None)
 
 
+def test_render_falls_back_to_silence_on_audio_stream_error(monkeypatch, tmp_path):
+    from capcut_coach.render import renderer
+    from capcut_coach.render.graph import CLEAN, RenderClip, RenderGraph
+    from capcut_coach.schemas.edit_plan import Canvas
+
+    calls: list[list[bool]] = []
+
+    def fake_run_once(graph, out, ff, timeout):
+        calls.append([c.has_audio for c in graph.clips])
+        if any(c.has_audio for c in graph.clips):  # first attempt: audio can't map
+            return 1, "Stream specifier ':a' matches no streams.", ["ffmpeg"]
+        return 0, "", ["ffmpeg"]  # silenced retry succeeds
+
+    monkeypatch.setattr(renderer, "_run_once", fake_run_once)
+    monkeypatch.setattr(renderer, "_resolve_ffmpeg", lambda f: "ffmpeg")
+    clip = RenderClip(asset_path=tmp_path / "a.mp4", source_start_us=0,
+                      source_duration_us=2_000_000, timeline_start_us=0, has_audio=True)
+    graph = RenderGraph(schema_version=1, canvas=Canvas(), clips=[clip], style=CLEAN)
+    res = renderer.render_graph(graph, tmp_path / "o.mp4")
+    assert res.returncode == 0 and "silence" in res.notes.lower()
+    assert calls == [[True], [False]]  # retried with clip audio silenced
+
+
+def test_error_summary_compresses_embedded_graph():
+    from capcut_coach.render.renderer import _summarise_error
+
+    giant = "Stream specifier ':a' in filtergraph description " + "[0:a]" * 500 + " matches no streams."
+    out = _summarise_error(giant)
+    assert "matches no streams" in out and "graph elided" in out
+
+
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 def test_autocreate_from_zip_with_nested_folder(tmp_path):
     """A .zip of clips (macOS-style: top folder + __MACOSX) renders 3 candidates."""

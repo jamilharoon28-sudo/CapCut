@@ -59,7 +59,7 @@ def _probe(path: Path, ffmpeg: str, ffprobe: str | None) -> tuple[int, bool, int
         try:
             import json as _json
 
-            entries = ("format=duration:stream=codec_type,duration,width,height:"
+            entries = ("format=duration:stream=codec_type,duration,width,height,channels:"
                        "stream_tags=rotate:side_data=rotation")
             out = subprocess.run(
                 [ffprobe, "-v", "error", "-print_format", "json",
@@ -68,7 +68,11 @@ def _probe(path: Path, ffmpeg: str, ffprobe: str | None) -> tuple[int, bool, int
             ).stdout
             data = _json.loads(out or "{}")
             streams = data.get("streams", [])
-            has_audio = any(s.get("codec_type") == "audio" for s in streams)
+            # Only count a *usable* audio stream (real channels) — a data/timecode
+            # or channel-less stream would make an [N:a] reference match no streams
+            # and crash the render, so treat it as no audio (routes to silence).
+            has_audio = any(s.get("codec_type") == "audio" and int(s.get("channels") or 0) > 0
+                            for s in streams)
             vstream = next((s for s in streams if s.get("codec_type") == "video"), None)
             # Duration: prefer format, then the video stream.
             dur = float(data.get("format", {}).get("duration") or 0.0)
@@ -391,7 +395,7 @@ def _render_candidates(
             qc = [f.to_public() for f in findings]
         results.append(AutoCreateResult(
             candidate_name=cand.name, output_path=out_path,
-            ok=ok, detail="ok" if r.returncode == 0 else r.stderr_tail, qc=qc,
+            ok=ok, detail=(r.notes or "ok") if r.returncode == 0 else r.stderr_tail, qc=qc,
         ))
     return results
 
