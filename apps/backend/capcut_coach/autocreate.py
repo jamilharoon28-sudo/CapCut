@@ -211,6 +211,9 @@ def autocreate(
     max_clips: int = DEFAULT_MAX_CLIPS,
     mode: str = "auto",          # auto | montage | talking
     smart: bool = True,          # visual moment-picking + subject reframe
+    music: Path | None = None,   # music track → beat-synced montage + soundtrack
+    logo: Path | None = None,    # logo image → branded outro
+    phrase_seconds: float = 2.0,
     ffmpeg: str | None = None,
     ffprobe: str | None = None,
 ) -> list[AutoCreateResult]:
@@ -242,7 +245,7 @@ def autocreate(
 
     plan = None
     # Talking-head mode: keep good spoken lines, cut fillers; captions = real words.
-    if mode in ("auto", "talking"):
+    if mode in ("auto", "talking") and music is None:
         from .talking import build_talking_plan, resolve_transcriber
         transcriber = resolve_transcriber()
         if transcriber is not None:
@@ -253,6 +256,16 @@ def autocreate(
                 "Talking-head mode needs a whisper.cpp model. Run scripts/setup-whisper.sh, "
                 "then set COACH_WHISPER_MODEL.")
 
+    # Beat-synced campaign montage when a music track is supplied (pack doc 18).
+    if plan is None and music is not None:
+        from .analysis.audio import analyse_audio
+        dna = analyse_audio(music, ff)
+        if dna is not None:
+            from .montage import build_music_montage
+            plan = build_music_montage(catalog, dna, project_id=project_id, target_us=target_us,
+                                       phrase_seconds=phrase_seconds, captions=captions,
+                                       analyses=analyses)
+
     if plan is None:  # montage (also the fallback when there is too little speech)
         plan = cold_start_plan(catalog, project_id=project_id, target_us=target_us,
                                captions=captions, max_clips=max_clips, analyses=analyses)
@@ -260,8 +273,16 @@ def autocreate(
     has_audio = {a.id: a.has_audio for a in catalog}
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    from .render.graph import Outro
+    outro = Outro(logo_path=logo) if logo is not None else None
+
     results: list[AutoCreateResult] = []
     for cand in build_candidates(plan, asset_paths, asset_has_audio=has_audio):
+        # Attach the soundtrack + branded ending to every candidate.
+        if music is not None:
+            cand.graph.music_path = music
+        if outro is not None:
+            cand.graph.outro = outro
         out_path = out_dir / f"{cand.name}.mp4"
         r = render_graph(cand.graph, out_path, ffmpeg=ff)
         results.append(AutoCreateResult(
@@ -283,10 +304,21 @@ def main(argv: list[str] | None = None) -> int:
                     help="auto picks talking-head cutting when speech + a whisper model exist")
     ap.add_argument("--no-smart", action="store_true",
                     help="disable visual moment-picking and subject reframe")
+    ap.add_argument("--music", type=Path, default=None,
+                    help="music track → beat-synced montage cuts + soundtrack")
+    ap.add_argument("--logo", type=Path, default=None,
+                    help="logo image → a branded outro")
+    ap.add_argument("--captions", type=Path, default=None,
+                    help="text file, one narrative line per shot")
     args = ap.parse_args(argv)
+    caption_lines = None
+    if args.captions and args.captions.exists():
+        caption_lines = [ln.strip() for ln in args.captions.read_text("utf-8").splitlines()
+                         if ln.strip()]
     try:
         results = autocreate(args.media_dir, args.out, target_seconds=args.seconds,
-                             max_clips=args.max_clips, mode=args.mode, smart=not args.no_smart)
+                             max_clips=args.max_clips, mode=args.mode, smart=not args.no_smart,
+                             music=args.music, logo=args.logo, captions=caption_lines)
     except (RuntimeError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2

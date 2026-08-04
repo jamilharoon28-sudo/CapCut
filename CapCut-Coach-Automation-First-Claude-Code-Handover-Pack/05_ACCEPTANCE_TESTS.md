@@ -124,6 +124,17 @@ No release is complete until the required-path tests are run and results are rec
 - No blank gaps unless intentional.
 - Captions match internal plan.
 
+### F7A Audio DNA and cut synchronisation
+
+- Fixtures cover dialogue-led, montage-led and hybrid audio with known beats/onsets, phrase boundaries, loudness and SFX.
+- Pass: detected timestamps stay inside duration; speech takes priority; eligible montage cuts/text reveals snap only inside their allowed window; at least 85% of cuts in the sanitised Mothers' Day parity fixture land within 200 ms of a valid musical onset/phrase boundary.
+- Pass: output has no click, unexpected silence, clipping or speech-masking music; EBU R128 and true-peak results are recorded.
+
+### F7B Same-footage reference parity
+
+- Run the sanitised fixture specified in `18_REFERENCE_QUALITY_AND_AUDIO_DNA.md` from script plus raw footage with an empty style profile.
+- Pass: Enhanced/Bold creates a complete text-led campaign, 10–13 purposeful visual blocks, required visual-role coverage, readable narrative typography, audio-aware pacing and supplied branded outro. It must not be a longer version of sequential raw clips.
+
 ### F8 Claude schema
 
 - Valid response accepted.

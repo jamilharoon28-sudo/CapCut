@@ -371,7 +371,7 @@ Each learning example accepts a script pack, one or more raw-footage folders/fil
 
 The script parser converts creative instructions into candidate constraints. It maps requested shots and overlays to detected footage, preserves cross-references such as `Reel 5 – Shot 3`, shows missing shots and permits correction. Raw footage remains the selection evidence; the approved final remains the visual outcome; readable CapCut timeline facts override uncertain inference.
 
-Music matching is optional and off for the initial owner workflow. The system may learn cut rhythm and audio-level preferences without retaining or identifying the original music track.
+Automatic music sourcing is optional and off for the initial owner workflow. Audio intelligence is not optional: analyse supplied/final audio for speech, music/SFX regions, tempo, onsets, phrases, energy, loudness and mix behaviour; learn derived timing/level preferences without retaining or identifying the original copyrighted track. Follow `18_REFERENCE_QUALITY_AND_AUDIO_DNA.md`.
 
 ### Finish & Free Space
 

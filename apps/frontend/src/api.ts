@@ -48,13 +48,15 @@ export const api = {
     req<Project>("/projects", { method: "POST", body: JSON.stringify({ title }) }),
   autocreate: (
     pid: string, mediaDir: string, targetSeconds: number,
-    opts?: { captions?: string[]; maxClips?: number; mode?: string },
+    opts?: { captions?: string[]; maxClips?: number; mode?: string;
+             musicPath?: string; logoPath?: string },
   ) =>
     req<{ job_id: string }>(`/projects/${pid}/autocreate`, {
       method: "POST",
       body: JSON.stringify({
         media_dir: mediaDir, target_seconds: targetSeconds,
         captions: opts?.captions, max_clips: opts?.maxClips, mode: opts?.mode,
+        music_path: opts?.musicPath || null, logo_path: opts?.logoPath || null,
       }),
     }),
   job: (id: string) => req<Job>(`/jobs/${id}`),

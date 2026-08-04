@@ -33,7 +33,9 @@ def test_command_is_argv_and_scales_to_canvas(tmp_path):
     assert cmd[0] == "ffmpeg"
     assert "scale=1080:1920:force_original_aspect_ratio=increase" in joined
     assert "crop=1080:1920" in joined
-    assert "concat=n=2:v=1:a=1" in joined
+    # Video and audio are concatenated separately (video-only + audio-only).
+    assert "concat=n=2:v=1:a=0" in joined  # video track
+    assert "concat=n=2:v=0:a=1" in joined  # audio track
     assert "libx264" in cmd and "aac" in cmd
 
 

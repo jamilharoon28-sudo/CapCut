@@ -27,6 +27,8 @@ class AutoCreateBody(BaseModel):
     captions: list[str] | None = None
     max_clips: int = Field(default=8, ge=1, le=40)
     mode: str = Field(default="auto", pattern="^(auto|montage|talking)$")
+    music_path: str | None = None   # music track → beat-synced montage
+    logo_path: str | None = None    # logo image → branded outro
 
 
 def _candidates_dir(request: Request, pid: str) -> Path:
@@ -34,14 +36,15 @@ def _candidates_dir(request: Request, pid: str) -> Path:
 
 
 def _run_job(app_state, pid: str, media_dir: Path, target_seconds: float,
-             captions: list[str] | None, max_clips: int, mode: str, job_id: str) -> None:
+             captions: list[str] | None, max_clips: int, mode: str,
+             music: Path | None, logo: Path | None, job_id: str) -> None:
     jobs = app_state.jobs
     out_dir = app_state.layout.project_dir(pid) / "candidates"
     try:
         jobs.transition(job_id, JobState.RUNNING, stage="rendering", percent=5)
         results = autocreate(media_dir, out_dir, project_id=pid,
                              target_seconds=target_seconds, captions=captions,
-                             max_clips=max_clips, mode=mode)
+                             max_clips=max_clips, mode=mode, music=music, logo=logo)
         manifest = [
             {"name": r.candidate_name, "file": r.output_path.name, "ok": r.ok,
              "detail": r.detail}
@@ -81,11 +84,23 @@ async def start_autocreate(pid: str, body: AutoCreateBody, request: Request) -> 
         roots.append(str(real))
         state.config.set("approved_media_roots", roots)
 
+    def _opt_file(raw: str | None) -> Path | None:
+        if not raw:
+            return None
+        p = Path(raw).expanduser().resolve(strict=False)
+        if is_cloud_path(p) or not p.is_file():
+            raise HTTPException(400, {"code": "bad_file",
+                                      "message": "That music/logo file couldn't be used."})
+        return p
+
+    music = _opt_file(body.music_path)
+    logo = _opt_file(body.logo_path)
+
     job = state.jobs.enqueue(type="autocreate", project_id=pid, heavy=True)
     thread = threading.Thread(
         target=_run_job,
         args=(state, pid, real, body.target_seconds, body.captions, body.max_clips,
-              body.mode, job.id),
+              body.mode, music, logo, job.id),
         daemon=True,
     )
     thread.start()

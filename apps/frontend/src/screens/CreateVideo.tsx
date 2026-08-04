@@ -14,6 +14,8 @@ export function CreateVideo() {
   const [seconds, setSeconds] = useState(20);
   const [maxClips, setMaxClips] = useState(8);
   const [mode, setMode] = useState("auto");
+  const [musicPath, setMusicPath] = useState("");
+  const [logoPath, setLogoPath] = useState("");
   const [captions, setCaptions] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [chosen, setChosen] = useState<string | null>(null);
@@ -33,6 +35,8 @@ export function CreateVideo() {
         captions: capLines.length ? capLines : undefined,
         maxClips,
         mode,
+        musicPath: musicPath.trim() || undefined,
+        logoPath: logoPath.trim() || undefined,
       });
       setPhase("rendering");
       setStage("Coach is building three edits…");
@@ -186,7 +190,31 @@ export function CreateVideo() {
           </span>
         </label>
         <label style={{ display: "grid", gap: 6 }}>
-          <span>On-screen captions (optional — one line per shot)</span>
+          <span>Music track (optional — enables beat-synced cuts)</span>
+          <input
+            value={musicPath}
+            onChange={(e) => setMusicPath(e.target.value)}
+            placeholder="/Users/you/Music/track.mp3"
+            style={{ minHeight: 44, borderRadius: 12, border: "1px solid var(--hairline)",
+                     padding: "0 12px" }}
+          />
+          <span className="muted" style={{ fontSize: 13 }}>
+            With music, Coach cuts on the beat (~2s phrases) and uses it as the soundtrack.
+            Use a track you own or that's licensed.
+          </span>
+        </label>
+        <label style={{ display: "grid", gap: 6 }}>
+          <span>Logo image (optional — adds a branded outro)</span>
+          <input
+            value={logoPath}
+            onChange={(e) => setLogoPath(e.target.value)}
+            placeholder="/Users/you/Brand/logo.png"
+            style={{ minHeight: 44, borderRadius: 12, border: "1px solid var(--hairline)",
+                     padding: "0 12px" }}
+          />
+        </label>
+        <label style={{ display: "grid", gap: 6 }}>
+          <span>On-screen text (optional — one line per shot, your campaign copy)</span>
           <textarea
             value={captions}
             onChange={(e) => setCaptions(e.target.value)}

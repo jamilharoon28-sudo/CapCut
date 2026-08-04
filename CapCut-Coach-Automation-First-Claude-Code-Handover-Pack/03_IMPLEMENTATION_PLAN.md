@@ -111,6 +111,7 @@ Turn raw local media into searchable, reusable analysis while protecting the M2 
 - Add word-level transcript, VAD, confidence and custom vocabulary correction.
 - Generate SRT, waveform, thumbnails and contact sheet.
 - Add scene boundary extraction.
+- Add free local Audio DNA extraction: speech/music/SFX regions, EBU R128, tempo/beat/onset candidates, phrase/energy curve and audio QC.
 - Cache outputs by content+tool+configuration hash.
 - Add storage budget and cleanup UI.
 - Add learning-capsule generation and local-only **Finish & Free Space** preview; source cleanup remains disabled until Phase 5 evidence exists.
@@ -140,6 +141,7 @@ Deliver useful scripted, montage, talking-head and testimonial drafts before pre
 - Generate 30/45/60-second candidates where possible.
 - Export selected individual clips, cleaned audio and SRT.
 - Implement the four format playbooks in `15_AUTOMATION_FIRST_ENGINE.md`.
+- Align eligible montage cuts and text reveals to audio phrase/onset candidates within semantic timing windows; preserve speech/action first.
 - Compile typed RenderGraphs and render Clean/Enhanced/Bold previews locally.
 
 ### Exit gate
@@ -219,6 +221,7 @@ Apply the universal Style DNA to produce a much closer first cut.
 - Match B-roll concepts to owned local assets.
 - Add placeholders when no suitable owned asset exists.
 - Analyse voice loudness and create music-ducking plan.
+- Implement same-footage reference parity evaluation from `18_REFERENCE_QUALITY_AND_AUDIO_DNA.md` using sanitised fixtures.
 - Add logo and CTA asset pack independent from Style DNA.
 - Render styled local previews.
 

@@ -59,8 +59,8 @@ def build_command(
 
     inputs: list[str] = []
     filters: list[str] = []
-    concat_labels: list[str] = []
-    audio_input_indexes: list[int] = []
+    video_labels: list[str] = []      # video segments to concat (clips + outro)
+    clip_audio_indexes: list[int] = []
 
     idx = 0
     for clip in graph.clips:
@@ -69,8 +69,6 @@ def build_command(
                    "-i", str(clip.asset_path)]
         vlabel = f"v{idx}"
         # Subject reframe: shift the crop window horizontally by crop_x_norm.
-        # k=0 centres; the (in_w-ow) term is ~0 for portrait sources, so this is
-        # a safe no-op when there is no horizontal room.
         k = max(-1.0, min(1.0, clip.crop_x_norm))
         crop_x = f"(in_w-{cw})/2*(1+{k:.3f})" if abs(k) > 1e-3 else f"(in_w-{cw})/2"
         vchain = (
@@ -82,56 +80,80 @@ def build_command(
                 f",eq=contrast={style.contrast}:brightness={style.brightness}"
                 f":saturation={style.saturation}"
             )
-        if clip.ken_burns:
-            # Slow push-in to ~106% over the clip; zoompan drives per-output-frame.
-            frames = max(1, round(clip.duration_s * fps))
-            vchain += (
-                f",zoompan=z='min(zoom+0.0006,1.06)':d={frames}"
-                f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={cw}x{ch}:fps={fps}"
-            )
-        vchain += f"[{vlabel}]"
+        vchain += f",format=yuv420p[{vlabel}]"
         filters.append(vchain)
-        concat_labels.append(f"[{vlabel}]")
-        audio_input_indexes.append(idx)
+        video_labels.append(f"[{vlabel}]")
+        clip_audio_indexes.append(idx)
         idx += 1
 
-    # Provide silence for clips that have no audio, so concat a=1 stays valid.
-    total_s = graph.total_us / 1_000_000
-    silence_idx: int | None = None
-    if any(not c.has_audio for c in graph.clips):
-        inputs += ["-f", "lavfi", "-t", f"{total_s:.3f}",
-                   "-i", "anullsrc=r=48000:cl=stereo"]
-        silence_idx = idx
+    # Branded outro: a logo over a solid background (pack doc 18).
+    outro_secs = 0.0
+    if graph.outro is not None:
+        outro_secs = graph.outro.duration_us / 1_000_000
+        inputs += ["-f", "lavfi", "-t", f"{outro_secs:.3f}",
+                   "-i", f"color=c={graph.outro.bg_color}:s={cw}x{ch}:r={fps}"]
+        color_idx = idx
         idx += 1
-
-    audio_labels: list[str] = []
-    for k, clip in enumerate(graph.clips):
-        alabel = f"a{k}"
-        if clip.has_audio:
-            src = f"[{audio_input_indexes[k]}:a]"
+        if graph.outro.logo_path is not None:
+            inputs += ["-i", str(graph.outro.logo_path)]
+            logo_idx = idx
+            idx += 1
+            filters.append(f"[{color_idx}:v]setsar=1[obg]")
+            filters.append(f"[{logo_idx}:v]scale={int(cw * 0.55)}:-1[olg]")
+            filters.append(
+                "[obg][olg]overlay=(W-w)/2:(H-h)/2,fade=t=in:st=0:d=0.4,"
+                "format=yuv420p,setsar=1[voutro]")
         else:
-            # Take a slice of the shared silence input for this clip's duration.
-            src = f"[{silence_idx}:a]"
-        filters.append(
-            f"{src}aformat=sample_rates=48000:channel_layouts=stereo,"
-            f"atrim=0:{clip.duration_s:.3f},asetpts=PTS-STARTPTS[{alabel}]"
-        )
-        audio_labels.append(f"[{alabel}]")
+            filters.append(f"[{color_idx}:v]format=yuv420p,setsar=1[voutro]")
+        video_labels.append("[voutro]")
 
-    n = len(graph.clips)
-    interleaved = "".join(f"{concat_labels[i]}{audio_labels[i]}" for i in range(n))
-    filters.append(f"{interleaved}concat=n={n}:v=1:a=1[vc][ac]")
-
-    # Captions (burned via ASS) then audio loudness normalisation.
+    # Video: concat all segments (video only), then burn captions.
+    nvid = len(video_labels)
+    filters.append(f"{''.join(video_labels)}concat=n={nvid}:v=1:a=0[vc]")
     if ass_path is not None and graph.captions:
         escaped = str(ass_path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
         filters.append(f"[vc]ass='{escaped}'[vout]")
     else:
         filters.append("[vc]null[vout]")
-    if style.loudnorm:
-        filters.append("[ac]loudnorm=I=-16:TP=-1.5:LRA=11[aout]")
+
+    total_s = graph.clips_total_us / 1_000_000 + outro_secs
+
+    # Audio: a music bed (montage) replaces clip audio; otherwise concat clip audio.
+    if graph.music_path is not None:
+        inputs += ["-i", str(graph.music_path)]
+        music_idx = idx
+        idx += 1
+        fade_start = max(0.0, total_s - 0.8)
+        filters.append(
+            f"[{music_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,"
+            f"atrim=0:{total_s:.3f},afade=t=out:st={fade_start:.3f}:d=0.8,"
+            f"apad=whole_dur={total_s:.3f},"
+            f"loudnorm=I=-14:TP=-1.0:LRA=11[aout]")
     else:
-        filters.append("[ac]anull[aout]")
+        # Silence source for clips without audio and for the outro tail.
+        need_silence = any(not c.has_audio for c in graph.clips) or graph.outro is not None
+        silence_idx: int | None = None
+        if need_silence:
+            inputs += ["-f", "lavfi", "-t", f"{total_s:.3f}",
+                       "-i", "anullsrc=r=48000:cl=stereo"]
+            silence_idx = idx
+            idx += 1
+        audio_labels: list[str] = []
+        for ci, clip in enumerate(graph.clips):
+            alabel = f"a{ci}"
+            src = f"[{clip_audio_indexes[ci]}:a]" if clip.has_audio else f"[{silence_idx}:a]"
+            filters.append(
+                f"{src}aformat=sample_rates=48000:channel_layouts=stereo,"
+                f"atrim=0:{clip.duration_s:.3f},asetpts=PTS-STARTPTS[{alabel}]")
+            audio_labels.append(f"[{alabel}]")
+        if graph.outro is not None:
+            filters.append(
+                f"[{silence_idx}:a]atrim=0:{outro_secs:.3f},asetpts=PTS-STARTPTS[aoutro]")
+            audio_labels.append("[aoutro]")
+        na = len(audio_labels)
+        filters.append(f"{''.join(audio_labels)}concat=n={na}:v=0:a=1[ac]")
+        norm = "loudnorm=I=-14:TP=-1.0:LRA=11" if style.loudnorm else "anull"
+        filters.append(f"[ac]{norm}[aout]")
 
     filter_complex = ";".join(filters)
     return [

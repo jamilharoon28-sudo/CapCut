@@ -31,7 +31,7 @@ Initial neutral defaults for short vertical videos:
 - keep text inside safe zones and readable at phone size;
 - show proof/result before CTA;
 - one clear CTA;
-- music optional and not required for plan quality;
+- a music track is optional, but any supplied soundtrack must be analysed for speech/music/SFX, phrase boundaries, beats/onsets, energy and safe loudness; montage cuts should use that structure where meaning permits;
 - generate more than one candidate rather than pretending there is one correct edit.
 
 These are editable defaults, not hard-coded universal truths.

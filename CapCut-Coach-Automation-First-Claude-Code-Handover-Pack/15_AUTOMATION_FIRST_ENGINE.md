@@ -125,9 +125,10 @@ The universal taste profile is shared. Playbooks provide structural constraints,
 
 Use the supplied videos and script pack as private evaluation references, not bundled fixtures:
 
-- The 16.6-second vertical treatment montage demonstrates a visually led playbook: roughly eleven concise shots, treatment/environment/detail progression and a logo outro.
+- The primary same-footage comparison is `bold.mp4` versus `mothersday 1.mp4`. The target turns the same treatment footage into a 29-second campaign through approximately two-second visual phrases, narrative text and a five-second branded outro. See `18_REFERENCE_QUALITY_AND_AUDIO_DNA.md`.
+- The separate 16.6-second 9 April treatment montage demonstrates the editor's faster visually led playbook: roughly eleven concise cuts, treatment/environment/detail progression and a logo outro.
 - The 23-second SmileBoxx reel demonstrates a scripted story playbook: immediate hook, five compact steps and a clear CTA in a 1080×1920 delivery.
-- The campaign documents demonstrate structured inputs containing reels, numbered shots, spoken lines, time guidance, overlays, cutaways, transitions, pacing and end cards. The parser must preserve these fields while treating music notes as optional for this owner.
+- The campaign documents demonstrate structured inputs containing reels, numbered shots, spoken lines, time guidance, overlays, cutaways, transitions, pacing and end cards. The parser must preserve these fields. A requested music track remains optional, but audio analysis, timing and safe mixing are mandatory whenever audio is present.
 
 Create sanitised synthetic fixtures with the same structural properties for automated tests. Never commit or redistribute the owner's client media, scripts, transcripts or extracted frames.
 

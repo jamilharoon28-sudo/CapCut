@@ -6,7 +6,7 @@ CapCut Coach becomes your local first editor. You give it a script and the large
 - **Enhanced** — the recommended version with a few tasteful improvements.
 - **Bold** — more experimental ideas for you to consider.
 
-You watch short previews and press one button: choose this, faster, calmer, change the hook or try again. Coach then renders the final MP4 on your Mac and checks it for black frames, missing captions, wrong size, audio problems and missing required script points.
+You watch short previews and press one button: choose this, faster, calmer, change the hook or try again. Coach understands whether the edit is dialogue-led or soundtrack-led, finds musical phrases/onsets, times suitable cuts and text reveals, protects speech and balances loudness. It then renders the final MP4 on your Mac and checks it for black frames, missing captions, wrong size, audio problems and missing required script points.
 
 You do not need a CapCut project, previous finished videos or CapCut Pro. If you want to touch something up, **Open in CapCut Free** prepares the MP4, captions and assets and Coach tells you the next step in plain language.
 

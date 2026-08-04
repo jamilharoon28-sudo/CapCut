@@ -128,6 +128,7 @@ The stretch target after refinement is a 60–80% reduction in hands-on time for
 16. `15_AUTOMATION_FIRST_ENGINE.md` — local rendering, format playbooks and maximum automation.
 17. `16_ZERO_EXAMPLE_COLD_START.md` — useful first edits without training examples or CapCut projects.
 18. `17_AUTONOMY_POLICY_AND_HUMAN_GATES.md` — what runs automatically and what always needs approval.
+19. `18_REFERENCE_QUALITY_AND_AUDIO_DNA.md` — same-footage target comparison, audio intelligence and measurable parity tests.
 
 ## 8. Decisions already made
 
@@ -141,6 +142,7 @@ The stretch target after refinement is a 60–80% reduction in hands-on time for
 - The local RenderGraph and MP4 renderer ship before any CapCut integration.
 - CapCut Free handoff is optional. Direct-write support is an optional future adapter enabled only for an exact tested app/schema combination.
 - Zero-example cold start is the default, with Clean/Enhanced/Bold candidates and reversible Coach ideas.
+- Audio intelligence is mandatory: speech, music, onsets, phrase timing, mixing and QC influence the edit even when automatic music selection is disabled.
 
 ## 9. Decisions still requiring evidence
 

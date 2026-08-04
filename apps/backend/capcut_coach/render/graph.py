@@ -75,6 +75,15 @@ class RenderCaption:
 
 
 @dataclass
+class Outro:
+    """A branded ending (pack doc 18): a logo over a solid background."""
+
+    logo_path: Path | None
+    duration_us: int = 4_500_000
+    bg_color: str = "0x111318"
+
+
+@dataclass
 class RenderGraph:
     schema_version: int
     canvas: Canvas
@@ -83,10 +92,17 @@ class RenderGraph:
     style: RenderStyle = field(default_factory=lambda: CLEAN)
     project_id: str = ""
     edit_plan_id: str = ""
+    music_path: Path | None = None   # music bed; replaces clip audio for montages
+    outro: Outro | None = None
+
+    @property
+    def clips_total_us(self) -> int:
+        return sum(c.source_duration_us for c in self.clips)
 
     @property
     def total_us(self) -> int:
-        return sum(c.source_duration_us for c in self.clips)
+        extra = self.outro.duration_us if self.outro else 0
+        return self.clips_total_us + extra
 
 
 def graph_from_edit_plan(

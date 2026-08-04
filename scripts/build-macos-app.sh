@@ -18,7 +18,7 @@ echo "== 1/4 Backend deps =="
 [[ -x "$python" ]] || ( cd "$here/apps/backend" && uv venv --python 3.12 .venv )
 # Always (re)sync deps so features like footage analysis (opencv) are present
 # even when the venv already existed from an earlier build.
-( cd "$here/apps/backend" && uv pip install -e ".[scripts,media,vision]" )
+( cd "$here/apps/backend" && uv pip install -e ".[scripts,media,vision,audio]" )
 
 echo "== 2/4 Build UI =="
 ( cd "$here/apps/frontend" && { [[ -d node_modules ]] || pnpm install; } && pnpm build )

@@ -3,13 +3,14 @@
 Open Terminal in the parent folder containing this handover, start Claude Code, and paste everything below.
 
 ```text
-You are the lead engineer for CapCut Coach, a private, automation-first local video editor for one beginner on an Apple-silicon M2 Mac. Read every file in `CapCut-Coach-Automation-First-Claude-Code-Handover-Pack/` from `00_READ_ME_FIRST.md` through `17_AUTONOMY_POLICY_AND_HUMAN_GATES.md` before changing code. Treat the pack as the product contract. Create and maintain `CLAUDE.md`, a decision log, a requirements-to-tests traceability matrix and an evidence register.
+You are the lead engineer for CapCut Coach, a private, automation-first local video editor for one beginner on an Apple-silicon M2 Mac. Read every file in `CapCut-Coach-Automation-First-Claude-Code-Handover-Pack/` from `00_READ_ME_FIRST.md` through `18_REFERENCE_QUALITY_AND_AUDIO_DNA.md` before changing code. Treat the pack as the product contract. Create and maintain `CLAUDE.md`, a decision log, a requirements-to-tests traceability matrix and an evidence register.
 
 Non-negotiable outcome:
 - With only a script and raw footage, and with zero training examples or CapCut projects, Coach automatically parses and groups shots, analyses the footage, builds typed RenderGraphs, renders Clean/Enhanced/Bold previews, accepts a simple choice or revision and renders a final local MP4.
 - The primary path must work without CapCut. CapCut Desktop Free is an optional finishing layer only.
 - Zero additional cost is a release blocker. Do not require or introduce CapCut Pro, Remotion, a paid API, Claude overage, hosted services, cloud rendering, paid transcription, paid stock or another subscription. Use the owner's existing Claude Max allowance only through the documented spend-stop policy.
 - Use FFmpeg/ffprobe, VideoToolbox with software fallback, whisper.cpp, ASS subtitles and locally generated SVG/raster assets. Pin versions/checksums and generate third-party notices.
+- Audio intelligence is required. Locally detect speech/music/SFX, tempo, beats, onsets, phrase/energy changes and EBU R128 loudness; align eligible cuts and text reveals without clipping speech/action. Implement `18_REFERENCE_QUALITY_AND_AUDIO_DNA.md` and its same-footage parity test.
 - Work incrementally with 2/10/50GB fixtures. Never load a whole large media file into RAM or browser upload it.
 - Google Drive and CapCut account/Cloud/Team Space are read-only. Never expose remote write, move, trash, permission or delete methods.
 - Never silently delete local originals. Finish & Free Space must show the exact local paths and bytes, check references, require explicit approval and move eligible standalone local raw to macOS Trash without emptying it.
@@ -27,7 +28,7 @@ Build in this order:
 8. Run tests after each slice, record real results and mark hardware/media-dependent work BLOCKED BY EVIDENCE rather than pretending it passed.
 
 The first milestone shown to the owner must be:
-script ZIP/document + raw folder -> automatic shot/take grouping -> Clean/Enhanced/Bold previews -> choose/revise -> locally rendered final MP4 + SRT + QC report.
+script ZIP/document + raw folder + optional owned audio/assets -> automatic shot/take grouping and Audio DNA -> Clean/Enhanced/Bold previews -> choose/revise -> locally rendered final MP4 + SRT + QC report.
 
 Before coding, respond with:
 1. your understanding of the finished owner experience;
