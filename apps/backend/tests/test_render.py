@@ -162,7 +162,8 @@ def test_drawtext_caption_chain_in_command(tmp_path):
     cmd = build_command(graph, tmp_path / "o.mp4", ass_path=None,
                         draw_captions=[(str(tmp_path / "c.txt"), 0.0, 2.0)])
     joined = " ".join(cmd)
-    assert "drawtext=fontfile=" in joined and "textfile=" in joined
+    assert "drawtext=" in joined and "textfile=" in joined
+    assert ("fontfile=" in joined) or ("font=" in joined)   # a real font or fontconfig family
     assert "enable='between(t,0.000,2.000)'" in joined
 
 

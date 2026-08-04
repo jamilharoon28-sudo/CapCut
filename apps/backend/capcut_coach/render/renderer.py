@@ -87,22 +87,48 @@ def _esc_filter_path(p: str) -> str:
     return p.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
 
+# Candidate caption fonts, in order. The first that exists on this Mac is used; if
+# none do, we fall back to the fontconfig family name so drawtext still resolves.
+_FONT_CANDIDATES = (
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/System/Library/Fonts/HelveticaNeue.ttc",
+    "/System/Library/Fonts/SFNS.ttf",
+    "/System/Library/Fonts/SFNSText.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/Library/Fonts/Arial.ttf",
+    "/System/Library/Fonts/Avenir.ttc",
+)
+
+
+def _resolve_caption_font() -> str:
+    """A real, existing font file for drawtext, or a fontconfig family fallback."""
+    import os
+
+    override = os.environ.get("COACH_CAPTION_FONT")
+    if override and Path(override).exists():
+        return override
+    for cand in _FONT_CANDIDATES:
+        if Path(cand).exists():
+            return cand
+    return "Helvetica"  # fontconfig family name (last resort)
+
+
 def _drawtext_chain(draw_captions: list[tuple[str, float, float]], cw: int, ch: int,
-                    style) -> str:
+                    style, font: str | None = None) -> str:
     """A comma-joined drawtext chain that burns captions using freetype (no libass).
 
     Each caption reads from its own textfile (so arbitrary text needs no escaping)
-    and is shown only during its time window. A font file may be supplied via
-    COACH_CAPTION_FONT; otherwise a common macOS system font is used.
+    and is shown only during its time window. ``font`` is a file path (uses
+    ``fontfile=``) or a fontconfig family name (uses ``font=``).
     """
-    import os
-
-    font = os.environ.get("COACH_CAPTION_FONT", "/System/Library/Fonts/Helvetica.ttc")
+    font = font or _resolve_caption_font()
+    font_opt = (f"fontfile='{_esc_filter_path(font)}'" if "/" in font
+                else f"font='{font}'")
     fontsize = max(30, ch // 22)
     parts = []
     for tf, s, e in draw_captions:
         parts.append(
-            f"drawtext=fontfile='{_esc_filter_path(font)}':textfile='{_esc_filter_path(tf)}'"
+            f"drawtext={font_opt}:textfile='{_esc_filter_path(tf)}'"
             f":fontcolor=white:fontsize={fontsize}:borderw=3:bordercolor=black@0.85"
             f":box=1:boxcolor=black@0.35:boxborderw={fontsize // 4}:line_spacing=6"
             f":x=(w-text_w)/2:y=h*0.74:enable='between(t,{s:.3f},{e:.3f})'")
