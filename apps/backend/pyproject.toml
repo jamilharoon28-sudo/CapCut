@@ -1,0 +1,40 @@
+[project]
+name = "capcut-coach"
+version = "0.1.0"
+description = "Private local editing assistant for CapCut Desktop Premium (one user, M2 Mac)."
+requires-python = ">=3.12"
+# Runtime deps kept intentionally small (see docs/adr + THIRD_PARTY_NOTICES).
+dependencies = [
+    "fastapi>=0.111,<1.0",
+    "uvicorn>=0.30,<1.0",
+    "pydantic>=2.7,<3.0",
+    "jsonschema>=4.22,<5.0",
+    "python-multipart>=0.0.9,<0.1",
+]
+
+[project.optional-dependencies]
+# Lazy features — imported only when their stage runs. The app starts and the
+# core test suite passes without any of these installed.
+scripts = ["python-docx>=1.1,<2.0", "pypdf>=4.2,<5.0"]
+media = ["scenedetect>=0.6,<0.7", "numpy>=1.26,<3.0"]
+dev = ["pytest>=8.2,<9.0", "httpx>=0.27,<1.0", "ruff>=0.5,<1.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["capcut_coach"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# BLE001: blind excepts here are deliberate defensive fallbacks (corrupt config,
+# best-effort logging/clip export). RUF007/RUF046: stylistic and equivalent.
+ignore = ["BLE001", "RUF007", "RUF046"]

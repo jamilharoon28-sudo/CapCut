@@ -1,0 +1,68 @@
+/* Premium beginner UX tokens (14_PREMIUM_UX_DESIGN_SYSTEM.md §8). */
+:root {
+  --bg: #f6f5f2;
+  --surface: #ffffff;
+  --canvas: #111318;
+  --text: #15161a;
+  --text-2: #676a73;
+  --accent: #6d5dfb;
+  --accent-hover: #5949e8;
+  --success: #168a5b;
+  --warning: #b66a15;
+  --danger: #c84141;
+  --hairline: #e7e5e0;
+
+  --radius-control: 12px;
+  --radius-card: 16px;
+  --radius-modal: 20px;
+  --space: 8px;
+  --tap: 44px;
+  --motion: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  font-family: -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  min-height: var(--tap);
+  padding: 0 20px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--motion) ease, border-color var(--motion) ease;
+}
+button:hover { border-color: #d9d6cf; }
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  padding: 24px;
+}
+.muted { color: var(--text-2); }
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #efe9ff;
+  color: var(--accent-hover);
+}
+.badge.blocked { background: #fbeee0; color: var(--warning); }

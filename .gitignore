@@ -1,0 +1,66 @@
+# --- Never commit user data, media, models, secrets, or absolute paths ---
+# Raw footage / finished videos / CapCut projects
+*.mov
+*.mp4
+*.m4v
+*.avi
+*.mkv
+*.wav
+*.mp3
+*.m4a
+*.srt
+!apps/backend/tests/fixtures/**/*.srt
+*.capcut
+*.draft
+draft_content.json
+# Models & binaries
+*.bin
+*.gguf
+models/
+whisper-*/
+# Secrets / tokens
+auth-token
+*.pem
+*.key
+.env
+.env.*
+# Runtime data (macOS Application Support / Caches / Logs live outside repo,
+# but guard local dev copies)
+.coach-data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+coach.log
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+dist/
+build/
+*.egg-info/
+
+# --- Node / frontend ---
+node_modules/
+apps/frontend/dist/
+apps/frontend/.vite/
+pnpm-debug.log*
+*.tsbuildinfo
+
+# --- Swift / Xcode ---
+apps/mac-bridge/.build/
+apps/mac-bridge/*.xcodeproj/xcuserdata/
+DerivedData/
+
+# --- OS / editor ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
