@@ -3,23 +3,18 @@ import { describe, expect, it } from "vitest";
 
 import { ProjectPath } from "./ProjectPath";
 
-describe("ProjectPath", () => {
+describe("ProjectPath (truthful workflow)", () => {
   it("marks the current step", () => {
-    render(<ProjectPath current="edit" />);
-    const current = screen.getByText("Coach Edit").closest("li");
+    render(<ProjectPath current="render" />);
+    const current = screen.getByText(/Render/).closest("li");
     expect(current?.getAttribute("aria-current")).toBe("step");
   });
 
-  it("renders all five steps", () => {
+  it("renders the four truthful steps and no CapCut finishing step", () => {
     render(<ProjectPath current="sources" />);
-    for (const label of [
-      "Sources",
-      "Script & Story",
-      "Coach Edit",
-      "Finish in CapCut",
-      "Review & Learn",
-    ]) {
-      expect(screen.getByText(label)).toBeTruthy();
+    for (const label of ["Sources", "Coach Edit", "Render", "Review & Learn"]) {
+      expect(screen.getByText(new RegExp(label))).toBeTruthy();
     }
+    expect(screen.queryByText(/Finish in CapCut/)).toBeNull();
   });
 });

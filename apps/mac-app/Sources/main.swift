@@ -104,10 +104,59 @@ func readToken() -> String {
         .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 }
 
+// Narrowly-scoped native file/folder picker bridge. The web UI posts
+// {requestId, kind} to the "coachPicker" handler; we open an NSOpenPanel and
+// return the chosen path to window.__coachPickerResolve(requestId, path). It
+// grants no broad filesystem access and never scans outside the user's choice.
+final class PickerBridge: NSObject, WKScriptMessageHandler {
+    weak var webView: WKWebView?
+
+    func userContentController(_ controller: WKUserContentController,
+                              didReceive message: WKScriptMessage) {
+        guard message.name == "coachPicker",
+              let body = message.body as? [String: Any],
+              let requestId = body["requestId"] as? String,
+              let kind = body["kind"] as? String else { return }
+
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        switch kind {
+        case "folder":
+            panel.canChooseFiles = false; panel.canChooseDirectories = true
+        case "audio":
+            panel.canChooseFiles = true; panel.canChooseDirectories = false
+            panel.allowedContentTypes = [.audio, .mp3, .wav, .mpeg4Audio]
+        case "image":
+            panel.canChooseFiles = true; panel.canChooseDirectories = false
+            panel.allowedContentTypes = [.image, .png, .jpeg]
+        case "script":
+            panel.canChooseFiles = true; panel.canChooseDirectories = false
+            panel.allowedContentTypes = [.plainText, .text]
+        default:
+            panel.canChooseFiles = true; panel.canChooseDirectories = false
+        }
+
+        panel.begin { [weak self] response in
+            let path = (response == .OK) ? (panel.url?.path ?? "") : ""
+            // JSON-encode the path so quotes/backslashes can't break out of the JS.
+            let encoded = String(data: (try? JSONSerialization.data(
+                withJSONObject: [path])) ?? Data(), encoding: .utf8) ?? "[\"\"]"
+            let idJSON = String(data: (try? JSONSerialization.data(
+                withJSONObject: [requestId])) ?? Data(), encoding: .utf8) ?? "[\"\"]"
+            let js = """
+            (function(){ var id=\(idJSON)[0]; var p=\(encoded)[0];
+              if (window.__coachPickerResolve) window.__coachPickerResolve(id, p || null); })();
+            """
+            self?.webView?.evaluateJavaScript(js, completionHandler: nil)
+        }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var webView: WKWebView!
     var backend: Backend?
+    let picker = PickerBridge()
 
     func applicationDidFinishLaunching(_ note: Notification) {
         guard let config = loadConfig() else { fatalError("missing launch.json") }
@@ -125,9 +174,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let js = "window.__COACH_TOKEN__ = \"\(token)\";"
                 controller.addUserScript(WKUserScript(source: js,
                     injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                // Register the native file/folder picker bridge.
+                controller.add(self.picker, name: "coachPicker")
                 let cfg = WKWebViewConfiguration()
                 cfg.userContentController = controller
                 self.webView = WKWebView(frame: .zero, configuration: cfg)
+                self.picker.webView = self.webView
                 self.window.contentView = self.webView
                 let target = healthy ? "http://127.0.0.1:\(port)/"
                                      : "data:text/html,<h2>Could not start CapCut Coach.</h2>"
@@ -146,7 +198,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
-    func applicationWillTerminate(_ note: Notification) { backend?.stop() }
+
+    func applicationWillTerminate(_ note: Notification) {
+        // Remove the message handler to avoid a retain cycle, then stop the backend.
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "coachPicker")
+        backend?.stop()
+    }
 }
 
 let app = NSApplication.shared

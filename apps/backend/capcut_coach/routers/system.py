@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 import sys
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from ..capcut.detect import detect_bundle, discover_project_roots
 
@@ -66,6 +66,57 @@ async def storage(request: Request) -> dict:
         "minimum_free_space_gb": state.config.get("minimum_free_space_gb"),
         "cache_budget_gb": state.config.get("cache_budget_gb"),
     }
+
+
+def _dir_size(path) -> int:
+    total = 0
+    if not path.exists():
+        return 0
+    for p in path.rglob("*"):
+        try:
+            if p.is_file():
+                total += p.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+@router.get("/system/cache/size")
+async def cache_size(request: Request) -> dict:
+    """Bytes of Coach-created cache/temp that can be safely reclaimed."""
+    layout = request.app.state.coach.layout
+    return {"bytes": _dir_size(layout.cache_dir), "path_kind": "coach_cache"}
+
+
+@router.post("/system/cache/cleanup")
+async def cache_cleanup(request: Request) -> dict:
+    """Delete ONLY the Coach cache dir contents, after an explicit confirm.
+
+    Never touches originals, project outputs, backups, or anything outside the
+    Coach cache directory.
+    """
+    import shutil as _sh
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not body.get("confirm"):
+        raise HTTPException(400, {"code": "confirm_required",
+                                  "message": "Confirmation is required before removing files."})
+    layout = request.app.state.coach.layout
+    before = _dir_size(layout.cache_dir)
+    for child in layout.cache_dir.glob("*") if layout.cache_dir.exists() else []:
+        try:
+            if child.is_dir():
+                _sh.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink(missing_ok=True)
+        except OSError:
+            pass
+    freed = before - _dir_size(layout.cache_dir)
+    return {"freed_bytes": max(0, freed), "originals_touched": False}
 
 
 @router.get("/system/permissions")

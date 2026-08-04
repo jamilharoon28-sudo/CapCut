@@ -165,9 +165,8 @@ async def preflight(pid: str, body: PreflightBody, request: Request) -> dict:
     from ..preflight import run_preflight
     from ..toolpaths import ffmpeg_path, ffprobe_path
 
-    state = request.app.state.coach
-    if not state.projects.get(pid):
-        raise HTTPException(404, {"code": "not_found", "message": "Project not found."})
+    # Smart Check only inspects a folder; it does not need a persisted project,
+    # so the UI can re-scan the active draft (or "adhoc") without creating throwaways.
     ff = ffmpeg_path()
     if not ff:
         raise HTTPException(400, {"code": "no_ffmpeg", "message": "FFmpeg isn't installed yet."})
@@ -201,6 +200,44 @@ async def preflight(pid: str, body: PreflightBody, request: Request) -> dict:
     data = report.model_dump()
     data["headline"] = report.headline
     return data
+
+
+class ApproveBody(BaseModel):
+    candidate: str                       # clean | enhanced | bold
+    destination_dir: str | None = None   # optional local folder to save a copy into
+
+
+@router.post("/projects/{pid}/approve")
+async def approve_candidate(pid: str, body: ApproveBody, request: Request) -> dict:
+    """Record the chosen candidate and optionally save a copy to a local folder.
+
+    Never modifies originals or cloud content. If a destination is given it must
+    be a local (non-cloud) folder; the chosen MP4 is *copied* there.
+    """
+    import shutil as _sh
+
+    state = request.app.state.coach
+    if not state.projects.get(pid):
+        raise HTTPException(404, {"code": "not_found", "message": "Project not found."})
+    out_dir = state.layout.project_dir(pid) / "candidates"
+    src = out_dir / f"{body.candidate}.mp4"
+    if not src.exists():
+        raise HTTPException(400, {"code": "no_such_candidate",
+                                  "message": "That version hasn't been rendered."})
+    (out_dir / "approved.json").write_text(
+        json.dumps({"candidate": body.candidate}), "utf-8")
+    state.projects.update(pid, step="review", status="approved")
+
+    saved_to = None
+    if body.destination_dir:
+        dest = Path(body.destination_dir).expanduser().resolve(strict=False)
+        if is_cloud_path(dest) or not dest.is_dir():
+            raise HTTPException(400, {"code": "bad_destination",
+                                      "message": "Choose a local folder to save into."})
+        target = dest / f"{state.projects.get(pid).title or 'coach-video'}-{body.candidate}.mp4"
+        _sh.copy2(src, target)
+        saved_to = str(target)
+    return {"approved": body.candidate, "saved_to": saved_to, "originals_touched": False}
 
 
 @router.get("/projects/{pid}/candidates")
