@@ -1,10 +1,10 @@
 """Audio DNA: tempo, beats, and onsets for beat-synced cutting (pack doc 18 §4).
 
-Local only. Extracts audio with FFmpeg, then uses librosa (pinned, open-source)
-to derive tempo, a beat grid, and onset times so the montage can place cuts
-within a small window of a real musical onset — never clipping a word or action
-just to hit a beat. librosa is optional; without it, beat-sync degrades to a
-fixed phrase grid.
+Local only, **numpy-only** — no librosa/numba, so it builds on any Python 3.12
+without a compile step. Extracts audio with FFmpeg, then derives a spectral-flux
+onset envelope, an autocorrelation tempo estimate, a phase-aligned beat grid and
+onset peaks, so the montage can place cuts within a small window of a real
+musical onset — never clipping a word or action just to hit a beat.
 """
 
 from __future__ import annotations
@@ -13,14 +13,6 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-
-
-def librosa_available() -> bool:
-    try:
-        import librosa  # noqa: F401
-        return True
-    except ImportError:
-        return False
 
 
 @dataclass
@@ -50,44 +42,106 @@ class AudioDNA:
         return cuts
 
 
-def _extract_wav(src: Path, dst: Path, ffmpeg: str, *, sr: int = 22050) -> bool:
+SR = 22050
+HOP = 512
+WIN = 1024
+
+
+def _extract_wav(src: Path, dst: Path, ffmpeg: str, *, sr: int = SR) -> bool:
     cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(src),
-           "-vn", "-ac", "1", "-ar", str(sr), str(dst)]
+           "-vn", "-ac", "1", "-ar", str(sr), "-c:a", "pcm_s16le", str(dst)]
     return subprocess.run(cmd, capture_output=True, check=False).returncode == 0 and dst.exists()
 
 
-def analyse_audio(path: Path, ffmpeg: str) -> AudioDNA | None:
-    """Return AudioDNA for a track, or None if librosa/audio is unavailable."""
-    if not librosa_available():
-        return None
-    import librosa
+def _read_wav_mono(path: Path):
+    """Read a mono 16-bit PCM WAV into a float32 numpy array in [-1, 1]."""
+    import wave
+
     import numpy as np
 
+    with wave.open(str(path), "rb") as w:
+        n = w.getnframes()
+        raw = w.readframes(n)
+        sampwidth = w.getsampwidth()
+    if sampwidth != 2:
+        return np.zeros(0, dtype="float32")
+    y = np.frombuffer(raw, dtype="<i2").astype("float32") / 32768.0
+    return y
+
+
+def analyse_audio(path: Path, ffmpeg: str) -> AudioDNA | None:
+    """Return AudioDNA for a track using a numpy-only detector (no numba/librosa).
+
+    Extracts a mono WAV with FFmpeg, then derives an onset envelope (spectral
+    flux), a tempo estimate (autocorrelation), a phase-aligned beat grid, and
+    onset peaks. Fully local and dependency-light so it builds on any Mac.
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return None
     with tempfile.TemporaryDirectory() as td:
         wav = Path(td) / "a.wav"
         if not _extract_wav(path, wav, ffmpeg):
             return None
         try:
-            y, sr = librosa.load(str(wav), sr=22050, mono=True)
+            y = _read_wav_mono(wav)
         except Exception:
             return None
-    if y.size == 0:
+    if y.size < WIN * 2:
         return None
-    duration = float(librosa.get_duration(y=y, sr=sr))
-    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
-    beat_times = librosa.frames_to_time(beat_frames, sr=sr)
-    onset_frames = librosa.onset.onset_detect(y=y, sr=sr, backtrack=True)
-    onset_times = librosa.frames_to_time(onset_frames, sr=sr)
-    tempo_val = float(np.atleast_1d(tempo)[0])
-    # Energy: mean RMS mapped to ~0..1 (‑40 dBFS→0, 0 dBFS→1).
-    rms = float(np.sqrt(np.mean(np.square(y)))) if y.size else 0.0
-    db = 20.0 * np.log10(rms + 1e-9)
+    duration = y.size / SR
+    energy_rms = float(np.sqrt(np.mean(np.square(y))))
+    db = 20.0 * np.log10(energy_rms + 1e-9)
     energy = float(min(1.0, max(0.0, (db + 40.0) / 40.0)))
+
+    # --- Onset envelope via spectral flux ---
+    window = np.hanning(WIN).astype("float32")
+    n_frames = 1 + (y.size - WIN) // HOP
+    prev = np.zeros(WIN // 2 + 1, dtype="float32")
+    env = np.empty(n_frames, dtype="float32")
+    for i in range(n_frames):
+        frame = y[i * HOP: i * HOP + WIN] * window
+        mag = np.abs(np.fft.rfft(frame))
+        flux = np.sum(np.maximum(0.0, mag - prev))
+        env[i] = flux
+        prev = mag
+    if env.max() > 0:
+        env = env / env.max()
+    fps = SR / HOP  # onset-envelope frames per second
+
+    # --- Tempo via autocorrelation of the onset envelope ---
+    e = env - env.mean()
+    ac = np.correlate(e, e, mode="full")[len(e) - 1:]
+    lo = int(fps * 60.0 / 180.0)   # 180 BPM
+    hi = int(fps * 60.0 / 60.0)    # 60 BPM
+    hi = min(hi, len(ac) - 1)
+    if hi <= lo:
+        tempo_bpm = 120.0
+        period = fps * 0.5
+    else:
+        lag = lo + int(np.argmax(ac[lo:hi]))
+        period = float(lag) if lag > 0 else fps * 0.5
+        tempo_bpm = 60.0 * fps / period
+
+    # --- Phase-aligned beat grid ---
+    first = int(np.argmax(env[: max(1, int(period))])) if env.size else 0
+    beats = []
+    t = float(first)
+    while t < n_frames:
+        beats.append(round(t / fps, 3))
+        t += period
+
+    # --- Onset peaks (above mean+std, locally maximal) ---
+    thr = env.mean() + env.std()
+    onsets = [round(i / fps, 3) for i in range(1, n_frames - 1)
+              if env[i] > thr and env[i] >= env[i - 1] and env[i] >= env[i + 1]]
+
     return AudioDNA(
-        duration_s=duration,
-        tempo_bpm=round(tempo_val, 1),
-        beat_times_s=[round(float(t), 3) for t in beat_times],
-        onset_times_s=[round(float(t), 3) for t in onset_times],
+        duration_s=round(duration, 2),
+        tempo_bpm=round(float(tempo_bpm), 1),
+        beat_times_s=beats,
+        onset_times_s=onsets,
         energy=round(energy, 3),
     )
 

@@ -35,9 +35,9 @@ def _rights_note(track: Path) -> str:
 def index_music(approved_roots: list[str] | list[Path], ffmpeg: str | None = None) -> list[MusicAsset]:
     """Return eligible MusicAssets found under the approved roots.
 
-    Analyses tempo/energy/duration when librosa+ffmpeg are available; otherwise
-    the track is still indexed (eligible) with zeroed analysis, so a music-led
-    edit can proceed with a fixed phrase grid.
+    Analyses tempo/energy/duration when ffmpeg is available (numpy-only detector);
+    otherwise the track is still indexed (eligible) with zeroed analysis, so a
+    music-led edit can proceed with a fixed phrase grid.
     """
     from ..analysis.audio import analyse_audio
     from ..toolpaths import ffmpeg_path

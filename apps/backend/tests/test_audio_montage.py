@@ -63,19 +63,26 @@ def test_render_command_music_bed_and_outro(tmp_path):
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 def test_analyse_audio_detects_tempo(tmp_path):
-    from capcut_coach.analysis.audio import analyse_audio, librosa_available
-    if not librosa_available():
-        pytest.skip("librosa not installed")
+    """Numpy-only detector (no librosa/numba) finds ~120 BPM on a click track."""
+    import wave
+
     import numpy as np
-    import soundfile as sf
+
+    from capcut_coach.analysis.audio import analyse_audio
 
     sr, bpm, dur = 22050, 120, 12
-    click = np.zeros(int(sr * dur))
+    click = np.zeros(int(sr * dur), dtype="float32")
     for b in np.arange(0, dur, 60 / bpm):
         i = int(b * sr)
-        click[i:i + int(0.02 * sr)] += np.sin(2 * np.pi * 1200 * np.arange(int(0.02 * sr)) / sr)
+        click[i:i + int(0.02 * sr)] += np.sin(
+            2 * np.pi * 1200 * np.arange(int(0.02 * sr)) / sr).astype("float32")
     wav = tmp_path / "click.wav"
-    sf.write(str(wav), click * 0.8, sr)
+    pcm = (np.clip(click * 0.8, -1, 1) * 32767).astype("<i2")
+    with wave.open(str(wav), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(pcm.tobytes())
     dna = analyse_audio(wav, shutil.which("ffmpeg"))
     assert dna is not None
     assert 108 <= dna.tempo_bpm <= 132  # detected near 120
