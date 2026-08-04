@@ -76,6 +76,7 @@ def create_app(layout: StorageLayout | None = None) -> FastAPI:
         return {"ok": True, "version": __version__}
 
     from .routers import create as create_router
+    from .routers import editing as editing_router
     from .routers import jobs as jobs_router
     from .routers import projects as projects_router
     from .routers import system as system_router
@@ -85,6 +86,7 @@ def create_app(layout: StorageLayout | None = None) -> FastAPI:
     app.include_router(projects_router.router, prefix="/api/v1", dependencies=guard)
     app.include_router(jobs_router.router, prefix="/api/v1", dependencies=guard)
     app.include_router(create_router.router, prefix="/api/v1", dependencies=guard)
+    app.include_router(editing_router.router, prefix="/api/v1", dependencies=guard)
 
     # Rendered preview MP4s — loopback-only, same-origin, so a <video> element can
     # play them without a bearer header. They live under the projects dir.

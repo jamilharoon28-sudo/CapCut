@@ -12,6 +12,7 @@ Never invents spoken text: captions come only from a supplied script/transcript.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 import subprocess
@@ -288,9 +289,32 @@ def autocreate(
     has_audio = {a.id: a.has_audio for a in catalog}
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    from .render.graph import Outro
-    outro = Outro(logo_path=logo) if logo is not None else None
+    # Persist the plan + catalog + light analyses so post-render editing (clip
+    # swaps, factual review) and re-renders work without re-analysing anything.
+    _persist_edit_state(out_dir, plan, catalog, analyses,
+                        music=music, logo=logo, voice_led=voice_led, target_us=target_us)
 
+    return _render_candidates(plan, asset_paths, has_audio, out_dir, ff,
+                              music=music, logo=logo, voice_led=voice_led,
+                              make_my_video=make_my_video)
+
+
+def _render_candidates(
+    plan: EditPlan,
+    asset_paths: dict[str, Path],
+    has_audio: dict[str, bool],
+    out_dir: Path,
+    ff: str,
+    *,
+    music: Path | None,
+    logo: Path | None,
+    voice_led: bool,
+    make_my_video: bool,
+) -> list[AutoCreateResult]:
+    """Build Clean/Enhanced/Bold graphs from a plan and render them to MP4s."""
+    from .render.graph import Outro
+
+    outro = Outro(logo_path=logo) if logo is not None else None
     candidates = build_candidates(plan, asset_paths, asset_has_audio=has_audio)
     for cand in candidates:
         # Attach the soundtrack + branded ending to every candidate.
@@ -327,6 +351,72 @@ def autocreate(
             ok=ok, detail="ok" if r.returncode == 0 else r.stderr_tail, qc=qc,
         ))
     return results
+
+
+# ---- Persisted edit state (for clip swaps / factual review / re-render) --------
+
+def _persist_edit_state(out_dir: Path, plan: EditPlan, catalog: list[CatalogAsset],
+                        analyses: dict, *, music: Path | None, logo: Path | None,
+                        voice_led: bool, target_us: int) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "plan.json").write_text(plan.model_dump_json(indent=2), "utf-8")
+    catalog_rows = [{"id": a.id, "path": str(a.path), "name": a.path.name,
+                     "duration_us": a.duration_us, "has_audio": a.has_audio}
+                    for a in catalog]
+    (out_dir / "catalog.json").write_text(json.dumps(catalog_rows, indent=2), "utf-8")
+    an_rows = {aid: {"score": float(getattr(an, "score", 0.0)),
+                     "best_start_us": int(getattr(an, "best_start_us", 0)),
+                     "crop_x_norm": float(getattr(an, "crop_x_norm", 0.0))}
+               for aid, an in (analyses or {}).items()}
+    (out_dir / "analyses.json").write_text(json.dumps(an_rows, indent=2), "utf-8")
+    ctx = {"music_path": str(music) if music else None,
+           "music_name": music.name if music else None,
+           "logo_path": str(logo) if logo else None,
+           "voice_led": bool(voice_led), "target_us": int(target_us)}
+    (out_dir / "render_context.json").write_text(json.dumps(ctx, indent=2), "utf-8")
+
+
+def load_edit_state(out_dir: Path) -> tuple[EditPlan, list[CatalogAsset], dict, dict] | None:
+    """Load persisted (plan, catalog, analyses, render_context). None if absent."""
+    plan_path = out_dir / "plan.json"
+    catalog_path = out_dir / "catalog.json"
+    if not (plan_path.exists() and catalog_path.exists()):
+        return None
+    plan = EditPlan.model_validate_json(plan_path.read_text("utf-8"))
+    rows = json.loads(catalog_path.read_text("utf-8"))
+    catalog = [CatalogAsset(id=r["id"], path=Path(r["path"]),
+                            duration_us=int(r["duration_us"]), has_audio=bool(r["has_audio"]))
+               for r in rows]
+    analyses: dict = {}
+    an_path = out_dir / "analyses.json"
+    if an_path.exists():
+        analyses = json.loads(an_path.read_text("utf-8"))
+    ctx: dict = {}
+    ctx_path = out_dir / "render_context.json"
+    if ctx_path.exists():
+        ctx = json.loads(ctx_path.read_text("utf-8"))
+    return plan, catalog, analyses, ctx
+
+
+def rerender_from_plan(out_dir: Path, *, make_my_video: bool = False,
+                       ffmpeg: str | None = None) -> list[AutoCreateResult]:
+    """Re-render candidates from the persisted (possibly edited) plan in ``out_dir``."""
+    from .toolpaths import ffmpeg_path
+
+    ff = ffmpeg or ffmpeg_path()
+    if not ff:
+        raise RuntimeError("ffmpeg not found; install it (brew install ffmpeg)")
+    loaded = load_edit_state(out_dir)
+    if loaded is None:
+        raise RuntimeError("no saved edit to re-render")
+    plan, catalog, _analyses, ctx = loaded
+    asset_paths = {a.id: a.path for a in catalog}
+    has_audio = {a.id: a.has_audio for a in catalog}
+    music = Path(ctx["music_path"]) if ctx.get("music_path") else None
+    logo = Path(ctx["logo_path"]) if ctx.get("logo_path") else None
+    return _render_candidates(plan, asset_paths, has_audio, out_dir, ff,
+                              music=music, logo=logo, voice_led=bool(ctx.get("voice_led")),
+                              make_my_video=make_my_video)
 
 
 def main(argv: list[str] | None = None) -> int:

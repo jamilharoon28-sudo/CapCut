@@ -26,6 +26,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "approved_music_roots": [],
     "capcut_project_roots": [],
     "export_roots": [],
+    # Local folder trusted one-tap auto-save copies finished videos into (must be
+    # a local, non-cloud path). None until the owner sets it.
+    "default_output_dir": None,
+    # Approved-video count that unlocks trusted one-tap auto-save (increment #4).
+    "autopilot_trust_threshold": 5,
     "processing_mode": "balanced",
     "pause_on_battery": True,
     "pause_heavy_work_while_capcut_open": True,

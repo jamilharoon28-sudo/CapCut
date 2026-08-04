@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-import { api, type DoctorCheck } from "../api";
+import { api, type DoctorCheck, type Trust } from "../api";
+import { PathField } from "../components/PathField";
 import { Button, Icon, SectionHeader, StatusPill } from "../components/ui";
 
 // Friendly system status. Raw internal keys are translated; cleanup touches only
@@ -19,12 +20,22 @@ export function Settings() {
   const [cacheBytes, setCacheBytes] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [freed, setFreed] = useState<number | null>(null);
+  const [trust, setTrust] = useState<Trust | null>(null);
 
   useEffect(() => {
     void api.doctor().then((d) => setDoctor(d.checks)).catch(() => setDoctor({}));
     void api.storage().then(setStorage).catch(() => {});
     void api.cacheSize().then((c) => setCacheBytes(c.bytes)).catch(() => {});
+    void Promise.resolve(api.trust?.()).then((t) => t && setTrust(t)).catch(() => {});
   }, []);
+
+  async function setSaveFolder(path: string) {
+    try {
+      const r = await api.setDefaultOutput(path || null);
+      setTrust((t) => (t ? { ...t, default_output_dir: r.default_output_dir,
+        ready_for_one_tap: t.autopilot_unlocked && !!r.default_output_dir } : t));
+    } catch { /* surfaced via the field staying unset */ }
+  }
 
   // "Ready" means the essential local engines are present. Optional tools
   // (CapCut, Claude helper, Node/pnpm/uv) don't block making a video.
@@ -86,6 +97,25 @@ export function Settings() {
           <p className="small muted" style={{ margin: "10px 0 0" }}>
             This removes only Coach’s cache/temporary files. Your videos, projects and originals are never touched.
           </p>
+        </div>
+
+        <div className="card stack">
+          <div className="between">
+            <strong>Automatic saving (one-tap)</strong>
+            {trust && (
+              <StatusPill tone={trust.ready_for_one_tap ? "ok" : "neutral"}>
+                {trust.ready_for_one_tap ? "On" : trust.autopilot_unlocked ? "Set a folder" : "Earning trust"}
+              </StatusPill>
+            )}
+          </div>
+          <p className="small muted" style={{ margin: 0 }}>
+            {trust && !trust.autopilot_unlocked
+              ? `After you approve ${trust.threshold} videos, Coach can make and save a video in one tap. ${trust.approvals}/${trust.threshold} so far.`
+              : "Coach can make a video and save a copy to this folder in one tap. It only ever writes here — never to your originals or cloud."}
+          </p>
+          <PathField icon="folder" title="Save finished videos to" kind="folder"
+            value={trust?.default_output_dir ?? ""} onChange={setSaveFolder}
+            hint="A local folder. Cloud/synced folders stay read-only." />
         </div>
 
         <div className="card">

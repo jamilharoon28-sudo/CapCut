@@ -15,6 +15,7 @@
 // This file is authored for macOS; it is not compiled in the Linux CI scaffold.
 
 import AppKit
+import UniformTypeIdentifiers
 import WebKit
 
 func log(_ s: String) { FileHandle.standardError.write((s + "\n").data(using: .utf8)!) }
@@ -122,7 +123,10 @@ final class PickerBridge: NSObject, WKScriptMessageHandler {
         panel.allowsMultipleSelection = false
         switch kind {
         case "folder":
-            panel.canChooseFiles = false; panel.canChooseDirectories = true
+            // A folder of clips OR a .zip of clips (backend extracts zips safely).
+            panel.canChooseFiles = true; panel.canChooseDirectories = true
+            panel.allowedContentTypes = [.folder, .zip]
+            panel.message = "Choose a folder of clips — or a .zip of clips"
         case "audio":
             panel.canChooseFiles = true; panel.canChooseDirectories = false
             panel.allowedContentTypes = [.audio, .mp3, .wav, .mpeg4Audio]

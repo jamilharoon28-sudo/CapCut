@@ -17,6 +17,20 @@ export type Readiness = {
   required_resolved: number; required_total: number;
   blocking_requests: Request[]; suggestions: Request[];
 };
+export type SlotAlternative = { asset_id: string; label: string; score: number; reason: string };
+export type Slot = {
+  index: number; segment_id: string; asset_id: string; label: string;
+  timeline_start_us: number; duration_us: number; role: string;
+  caption: string | null; alternatives: SlotAlternative[];
+};
+export type ReviewItem = {
+  id: string; label: string; detail: string; kind: string; requires_ack: boolean;
+};
+export type ReviewGroup = { key: string; title: string; note: string; items: ReviewItem[] };
+export type Trust = {
+  approvals: number; threshold: number; remaining: number;
+  autopilot_unlocked: boolean; default_output_dir: string | null; ready_for_one_tap: boolean;
+};
 
 export class CoachError extends Error {
   code: string;
@@ -80,19 +94,40 @@ export const api = {
         music_path: opts?.musicPath || null, logo_path: opts?.logoPath || null }),
     }),
 
-  makeMyVideo: (pid: string, mediaDir: string, targetSeconds: number, opts?: AutoOpts) =>
-    req<{ job_id: string }>(`/projects/${pid}/make-my-video`, {
+  makeMyVideo: (pid: string, mediaDir: string, targetSeconds: number,
+    opts?: AutoOpts & { autoSave?: boolean }) =>
+    req<{ job_id: string; auto_save: boolean }>(`/projects/${pid}/make-my-video`, {
       method: "POST",
       body: JSON.stringify({ media_dir: mediaDir, target_seconds: targetSeconds,
         captions: opts?.captions, mode: opts?.mode,
-        music_path: opts?.musicPath || null, logo_path: opts?.logoPath || null }),
+        music_path: opts?.musicPath || null, logo_path: opts?.logoPath || null,
+        auto_save: opts?.autoSave ?? false }),
     }),
 
   job: (id: string) => req<Job>(`/jobs/${id}`),
   candidates: (pid: string) => req<{ candidates: Candidate[] }>(`/projects/${pid}/candidates`),
-  approve: (pid: string, candidate: string, destinationDir?: string) =>
+  approve: (pid: string, candidate: string, destinationDir?: string, acknowledged?: string[]) =>
     req<{ approved: string; saved_to: string | null }>(`/projects/${pid}/approve`, {
       method: "POST",
-      body: JSON.stringify({ candidate, destination_dir: destinationDir || null }),
+      body: JSON.stringify({ candidate, destination_dir: destinationDir || null,
+        acknowledged: acknowledged ?? [] }),
+    }),
+
+  // Per-slot clip alternatives + swap (increment #2).
+  slots: (pid: string) => req<{ slots: Slot[] }>(`/projects/${pid}/slots`),
+  replaceSlot: (pid: string, index: number, assetId: string) =>
+    req<{ job_id: string }>(`/projects/${pid}/slots/${index}/replace`, {
+      method: "POST", body: JSON.stringify({ asset_id: assetId }),
+    }),
+
+  // Pre-publish factual review (increment #3).
+  review: (pid: string) =>
+    req<{ groups: ReviewGroup[]; required_ack_ids: string[] }>(`/projects/${pid}/review`),
+
+  // Earned-trust one-tap auto-save (increment #4).
+  trust: () => req<Trust>("/system/trust"),
+  setDefaultOutput: (path: string | null) =>
+    req<{ default_output_dir: string | null }>("/system/default-output", {
+      method: "POST", body: JSON.stringify({ path }),
     }),
 };

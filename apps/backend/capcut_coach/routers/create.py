@@ -29,6 +29,7 @@ class AutoCreateBody(BaseModel):
     mode: str = Field(default="auto", pattern="^(auto|montage|talking)$")
     music_path: str | None = None   # music track → beat-synced montage
     logo_path: str | None = None    # logo image → branded outro
+    auto_save: bool = False         # trusted one-tap: auto-save best (increment #4)
 
 
 def _candidates_dir(request: Request, pid: str) -> Path:
@@ -71,17 +72,20 @@ async def start_autocreate(pid: str, body: AutoCreateBody, request: Request) -> 
 
     raw = Path(body.media_dir).expanduser()
     real = raw.resolve(strict=False)
-    if not real.is_dir():
+    # Accept a folder of clips OR a .zip of clips (extracted safely by autocreate).
+    is_zip = real.is_file() and real.suffix.lower() == ".zip"
+    if not real.is_dir() and not is_zip:
         raise HTTPException(400, {"code": "bad_folder",
-                                  "message": "That folder could not be found."})
+                                  "message": "Choose a folder of clips, or a .zip of clips."})
     if is_cloud_path(real):
         raise HTTPException(400, {"code": "cloud_readonly",
                                   "message": "Cloud/synced folders are read-only; "
                                              "copy clips to a local folder first."})
-    # Record the folder as an approved media root (explicit owner selection).
+    # Record the source folder as an approved media root (explicit owner selection).
+    root = str(real.parent if is_zip else real)
     roots = list(state.config.get("approved_media_roots") or [])
-    if str(real) not in roots:
-        roots.append(str(real))
+    if root not in roots:
+        roots.append(root)
         state.config.set("approved_media_roots", roots)
 
     def _opt_file(raw: str | None) -> Path | None:
@@ -122,9 +126,18 @@ async def make_my_video(pid: str, body: AutoCreateBody, request: Request) -> dic
                                   "message": "Cloud/synced folders are read-only."})
     music_roots = list(state.config.get("approved_music_roots") or [])
 
+    # Trusted one-tap auto-save is only honoured once trust is earned AND a local
+    # default output folder is set (increment #4). Otherwise the video is still
+    # rendered for the owner to review and save manually.
+    auto_save = bool(body.auto_save) and _one_tap_ready(state)
+
     job = state.jobs.enqueue(type="make_my_video", project_id=pid, heavy=True)
 
     def _worker() -> None:
+        import shutil as _sh
+
+        from ..approvals import record_approval
+
         out_dir = state.layout.project_dir(pid) / "candidates"
         try:
             state.jobs.transition(job.id, JobState.RUNNING, stage="rendering", percent=5)
@@ -138,6 +151,17 @@ async def make_my_video(pid: str, body: AutoCreateBody, request: Request) -> dic
                          "detail": r.detail} for r in results]
             (out_dir / "candidates.json").write_text(json.dumps(manifest, indent=2), "utf-8")
             ok = bool(results) and all(r.ok for r in results)
+            if ok and auto_save:
+                best = results[0]
+                dest = Path(str(state.config.get("default_output_dir"))).expanduser()
+                if dest.is_dir() and not is_cloud_path(dest):
+                    title = state.projects.get(pid).title or "coach-video"
+                    _sh.copy2(best.output_path, dest / f"{title}-{best.candidate_name}.mp4")
+                    (out_dir / "approved.json").write_text(
+                        json.dumps({"candidate": best.candidate_name, "auto_saved": True}), "utf-8")
+                    record_approval(state.layout.db_path, pid, best.candidate_name,
+                                    auto_saved=True)
+                    state.projects.update(pid, step="review", status="approved")
             state.jobs.transition(job.id, JobState.SUCCEEDED if ok else JobState.FAILED,
                                   stage="done" if ok else "render_error", percent=100,
                                   error_code=None if ok else "render_failed")
@@ -147,7 +171,18 @@ async def make_my_video(pid: str, body: AutoCreateBody, request: Request) -> dic
 
     threading.Thread(target=_worker, daemon=True).start()
     state.projects.update(pid, step="edit", status="rendering")
-    return {"job_id": job.id}
+    return {"job_id": job.id, "auto_save": auto_save}
+
+
+def _one_tap_ready(state) -> bool:
+    """True when trusted one-tap auto-save is unlocked and a local dest is set."""
+    from ..approvals import approval_count
+
+    threshold = int(state.config.get("autopilot_trust_threshold") or 5)
+    dest = state.config.get("default_output_dir")
+    if not dest or is_cloud_path(Path(str(dest)).expanduser()):
+        return False
+    return approval_count(state.layout.db_path) >= threshold
 
 
 class PreflightBody(BaseModel):
@@ -205,16 +240,23 @@ async def preflight(pid: str, body: PreflightBody, request: Request) -> dict:
 class ApproveBody(BaseModel):
     candidate: str                       # clean | enhanced | bold
     destination_dir: str | None = None   # optional local folder to save a copy into
+    acknowledged: list[str] = Field(default_factory=list)  # ticked review items
 
 
 @router.post("/projects/{pid}/approve")
 async def approve_candidate(pid: str, body: ApproveBody, request: Request) -> dict:
     """Record the chosen candidate and optionally save a copy to a local folder.
 
+    Before saving, every *required* factual-review item (increment #3) must be
+    acknowledged — Coach never treats an edit as publish-ready on its own.
     Never modifies originals or cloud content. If a destination is given it must
     be a local (non-cloud) folder; the chosen MP4 is *copied* there.
     """
     import shutil as _sh
+
+    from ..approvals import record_approval
+    from ..autocreate import load_edit_state
+    from ..editing import build_review_groups, required_ack_ids
 
     state = request.app.state.coach
     if not state.projects.get(pid):
@@ -224,6 +266,20 @@ async def approve_candidate(pid: str, body: ApproveBody, request: Request) -> di
     if not src.exists():
         raise HTTPException(400, {"code": "no_such_candidate",
                                   "message": "That version hasn't been rendered."})
+
+    # Enforce the pre-publish factual review: all required items must be ticked.
+    loaded = load_edit_state(out_dir)
+    if loaded is not None:
+        plan, _catalog, _analyses, ctx = loaded
+        groups = build_review_groups(
+            plan, music_present=bool(ctx.get("music_path")),
+            music_name=ctx.get("music_name"), logo_present=bool(ctx.get("logo_path")))
+        missing = required_ack_ids(groups) - set(body.acknowledged)
+        if missing:
+            raise HTTPException(409, {"code": "review_incomplete",
+                                      "message": "Please confirm the highlighted items first.",
+                                      "missing": sorted(missing)})
+
     (out_dir / "approved.json").write_text(
         json.dumps({"candidate": body.candidate}), "utf-8")
     state.projects.update(pid, step="review", status="approved")
@@ -237,6 +293,9 @@ async def approve_candidate(pid: str, body: ApproveBody, request: Request) -> di
         target = dest / f"{state.projects.get(pid).title or 'coach-video'}-{body.candidate}.mp4"
         _sh.copy2(src, target)
         saved_to = str(target)
+
+    # Record the approval — this grows earned trust toward one-tap (increment #4).
+    record_approval(state.layout.db_path, pid, body.candidate, auto_saved=False)
     return {"approved": body.candidate, "saved_to": saved_to, "originals_touched": False}
 
 

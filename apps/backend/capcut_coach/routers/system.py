@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import shutil
 import sys
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from ..capcut.detect import detect_bundle, discover_project_roots
+from ..security import is_cloud_path
 
 router = APIRouter(tags=["system"])
 
@@ -117,6 +120,49 @@ async def cache_cleanup(request: Request) -> dict:
             pass
     freed = before - _dir_size(layout.cache_dir)
     return {"freed_bytes": max(0, freed), "originals_touched": False}
+
+
+@router.get("/system/trust")
+async def trust(request: Request) -> dict:
+    """Earned-trust level for one-tap auto-save (increment #4).
+
+    Reports how many videos the owner has approved and whether trusted one-tap
+    auto-save has unlocked. Also reports whether a local default output folder is
+    set (required for auto-save).
+    """
+    from ..approvals import trust_state
+
+    state = request.app.state.coach
+    threshold = int(state.config.get("autopilot_trust_threshold") or 5)
+    data = trust_state(state.layout.db_path, threshold)
+    default_out = state.config.get("default_output_dir")
+    data["default_output_dir"] = default_out
+    data["ready_for_one_tap"] = bool(data["autopilot_unlocked"] and default_out)
+    return data
+
+
+class DefaultOutputBody(BaseModel):
+    path: str | None = None   # None clears it
+
+
+@router.post("/system/default-output")
+async def set_default_output(body: DefaultOutputBody, request: Request) -> dict:
+    """Set (or clear) the local folder trusted one-tap auto-save copies into.
+
+    Must be a local, non-cloud folder — cloud/synced folders stay read-only.
+    """
+    state = request.app.state.coach
+    if not body.path:
+        state.config.set("default_output_dir", None)
+        return {"default_output_dir": None}
+    dest = Path(body.path).expanduser().resolve(strict=False)
+    if not dest.is_dir():
+        raise HTTPException(400, {"code": "bad_folder", "message": "That folder wasn't found."})
+    if is_cloud_path(dest):
+        raise HTTPException(400, {"code": "cloud_readonly",
+                                  "message": "Choose a local folder — cloud folders stay read-only."})
+    state.config.set("default_output_dir", str(dest))
+    return {"default_output_dir": str(dest)}
 
 
 @router.get("/system/permissions")
