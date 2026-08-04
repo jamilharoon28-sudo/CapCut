@@ -362,7 +362,8 @@ def _write_pipeline_summary(out_dir: Path, *, results: list, smart: bool, cv2_ok
                             logo: Path | None) -> None:
     """Record what Coach did vs skipped (with how to enable the rest)."""
     details = " ".join(r.detail for r in results if r.detail)
-    captions_dropped = "burned in" in details          # libass missing at render
+    captions_dropped = "couldn't be added" in details or "Captions dropped" in details
+    captions_plain = "plain text" in details            # drawtext fallback (no libass)
     audio_silenced = "silence" in details
 
     def item(key, title, applied, detail):
@@ -383,8 +384,10 @@ def _write_pipeline_summary(out_dir: Path, *, results: list, smart: bool, cv2_ok
               else "Used your chosen track") if music is not None
              else "No music track or approved music folder set (Coach never rips music)"),
         item("captions", "Captions", captions_requested and not captions_dropped,
-             "Added on-screen captions" if (captions_requested and not captions_dropped)
-             else ("Your FFmpeg can't burn in captions — run: brew reinstall ffmpeg"
+             ("Added on-screen captions (plain text — install libass for styled captions)"
+              if captions_plain else "Added on-screen captions")
+             if (captions_requested and not captions_dropped)
+             else ("Your FFmpeg couldn't render captions at all — run: brew reinstall ffmpeg"
                    if captions_dropped else
                    "No script provided (type one line per shot), and speech captions need a whisper model")),
         item("audio", "Audio", not audio_silenced,

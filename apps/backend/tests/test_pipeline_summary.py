@@ -33,9 +33,16 @@ def test_plain_montage_reports_each_skip_with_a_fix(tmp_path: Path):
 
 def test_dropped_captions_point_at_ffmpeg(tmp_path: Path):
     feats = _summary(tmp_path, captions_requested=True,
-                     results=[_R(detail="Captions couldn't be burned in (your FFmpeg lacks subtitle support).")])
+                     results=[_R(detail="Captions couldn't be added.")])
     assert feats["captions"]["applied"] is False
     assert "brew reinstall ffmpeg" in feats["captions"]["detail"]
+
+
+def test_drawtext_captions_count_as_applied(tmp_path: Path):
+    feats = _summary(tmp_path, captions_requested=True,
+                     results=[_R(detail="Captions rendered as plain text (your FFmpeg lacks libass).")])
+    assert feats["captions"]["applied"] is True
+    assert "plain text" in feats["captions"]["detail"]
 
 
 def test_full_features_all_applied(tmp_path: Path):

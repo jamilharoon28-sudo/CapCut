@@ -82,11 +82,39 @@ def _transpose_chain(rotation: int) -> str:
     return ""
 
 
+def _esc_filter_path(p: str) -> str:
+    """Escape a filesystem path for use inside an FFmpeg filter option."""
+    return p.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
+
+def _drawtext_chain(draw_captions: list[tuple[str, float, float]], cw: int, ch: int,
+                    style) -> str:
+    """A comma-joined drawtext chain that burns captions using freetype (no libass).
+
+    Each caption reads from its own textfile (so arbitrary text needs no escaping)
+    and is shown only during its time window. A font file may be supplied via
+    COACH_CAPTION_FONT; otherwise a common macOS system font is used.
+    """
+    import os
+
+    font = os.environ.get("COACH_CAPTION_FONT", "/System/Library/Fonts/Helvetica.ttc")
+    fontsize = max(30, ch // 22)
+    parts = []
+    for tf, s, e in draw_captions:
+        parts.append(
+            f"drawtext=fontfile='{_esc_filter_path(font)}':textfile='{_esc_filter_path(tf)}'"
+            f":fontcolor=white:fontsize={fontsize}:borderw=3:bordercolor=black@0.85"
+            f":box=1:boxcolor=black@0.35:boxborderw={fontsize // 4}:line_spacing=6"
+            f":x=(w-text_w)/2:y=h*0.74:enable='between(t,{s:.3f},{e:.3f})'")
+    return ",".join(parts)
+
+
 def build_command(
     graph: RenderGraph,
     output_path: Path,
     *,
     ass_path: Path | None,
+    draw_captions: list[tuple[str, float, float]] | None = None,
     ffmpeg: str = "ffmpeg",
     fps: int = 30,
 ) -> list[str]:
@@ -156,8 +184,10 @@ def build_command(
     nvid = len(video_labels)
     filters.append(f"{''.join(video_labels)}concat=n={nvid}:v=1:a=0[vc]")
     if ass_path is not None and graph.captions:
-        escaped = str(ass_path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+        escaped = _esc_filter_path(str(ass_path))
         filters.append(f"[vc]ass='{escaped}'[vout]")
+    elif draw_captions:
+        filters.append(f"[vc]{_drawtext_chain(draw_captions, cw, ch, style)}[vout]")
     else:
         filters.append("[vc]null[vout]")
 
@@ -253,16 +283,34 @@ def build_command(
     ]
 
 
-def _run_once(graph: RenderGraph, output_path: Path, ff: str,
-              timeout: float) -> tuple[int, str, list[str]]:
-    """Build + execute one render attempt. Returns (returncode, stderr, cmd)."""
+def _run_once(graph: RenderGraph, output_path: Path, ff: str, timeout: float,
+              caption_mode: str | None) -> tuple[int, str, list[str]]:
+    """Build + execute one render attempt with a chosen caption renderer.
+
+    ``caption_mode``: "ass" (libass), "drawtext" (freetype — works without libass),
+    or None (no burned captions). Caption text/ASS files live in a temp dir that is
+    cleaned up after the attempt.
+    """
     ass_path: Path | None = None
+    draw: list[tuple[str, float, float]] | None = None
     tmpdir: tempfile.TemporaryDirectory | None = None
-    if graph.captions and graph.style.captions:
+    want_caps = bool(graph.captions) and graph.style.captions and caption_mode
+
+    if want_caps:
         tmpdir = tempfile.TemporaryDirectory()
-        ass_path = Path(tmpdir.name) / "captions.ass"
-        ass_path.write_text(build_ass(graph.captions, graph.canvas, graph.style), "utf-8")
-    cmd = build_command(graph, output_path, ass_path=ass_path, ffmpeg=ff)
+        base = Path(tmpdir.name)
+        if caption_mode == "ass":
+            ass_path = base / "captions.ass"
+            ass_path.write_text(build_ass(graph.captions, graph.canvas, graph.style), "utf-8")
+        elif caption_mode == "drawtext":
+            draw = []
+            for i, cap in enumerate(graph.captions):
+                tf = base / f"cap_{i}.txt"
+                tf.write_text(cap.text, "utf-8")
+                s = cap.start_us / 1_000_000
+                draw.append((str(tf), s, s + cap.duration_us / 1_000_000))
+
+    cmd = build_command(graph, output_path, ass_path=ass_path, draw_captions=draw, ffmpeg=ff)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
     finally:
@@ -271,35 +319,36 @@ def _run_once(graph: RenderGraph, output_path: Path, ff: str,
     return proc.returncode, proc.stderr, cmd
 
 
-def _degradations(graph: RenderGraph):
-    """Yield (graph, note) fallbacks from full fidelity to most robust.
+def _attempts(graph: RenderGraph):
+    """Ordered (graph, caption_mode, note) attempts, most-featureful first.
 
-    Real-world footage / FFmpeg builds fail in two independent ways: the caption
-    burn-in (``ass``/libass) can be missing or rejected, and a clip's audio stream
-    can be unmappable. We try dropping only what's broken, preserving the rest, so
-    the owner always gets a finished video and is told what had to be dropped.
+    Two independent failure axes: caption burn-in (libass may be missing → try
+    drawtext/freetype next) and clip audio (an unmappable stream → silence). We
+    prefer keeping captions, then audio; a finished video beats a perfect one.
     """
     import copy
 
     has_caps = bool(graph.captions) and graph.style.captions
-    has_clip_audio = graph.music_path is None and any(c.has_audio for c in graph.clips)
+    has_audio = graph.music_path is None and any(c.has_audio for c in graph.clips)
 
-    yield graph, ""
-    if has_caps:  # captions broken, audio fine
-        g = copy.deepcopy(graph)
-        g.captions = []
-        yield g, "Captions couldn't be burned in (your FFmpeg lacks subtitle support)."
-    if has_clip_audio:  # audio broken, captions fine
-        g = copy.deepcopy(graph)
-        for c in g.clips:
-            c.has_audio = False
-        yield g, "Some clips had unreadable audio; rendered with silence."
-    if has_caps and has_clip_audio:  # both broken
-        g = copy.deepcopy(graph)
-        g.captions = []
-        for c in g.clips:
-            c.has_audio = False
-        yield g, "Captions and some audio couldn't be used."
+    silent = copy.deepcopy(graph)
+    for c in silent.clips:
+        c.has_audio = False
+
+    if has_caps:
+        yield graph, "ass", ""
+        yield graph, "drawtext", "Captions rendered as plain text (your FFmpeg lacks libass)."
+        if has_audio:
+            yield silent, "ass", "Some clips had unreadable audio; rendered with silence."
+            yield silent, "drawtext", ("Captions as plain text and some audio silenced "
+                                       "(FFmpeg lacks libass; unreadable audio).")
+        yield graph, None, "Captions couldn't be added."
+        if has_audio:
+            yield silent, None, "Captions dropped and some audio silenced."
+    else:
+        yield graph, None, ""
+        if has_audio:
+            yield silent, None, "Some clips had unreadable audio; rendered with silence."
 
 
 def render_graph(
@@ -309,19 +358,19 @@ def render_graph(
     ffmpeg: str | None = None,
     timeout: float = 1800.0,
 ) -> RenderResult:
-    """Render a graph to an MP4 with a graceful-degradation fallback cascade.
+    """Render a graph to an MP4 with a graceful-degradation cascade.
 
-    The first attempt is full fidelity. If it fails, Coach retries dropping only
-    the broken part (captions, then audio, then both) so a finished video is
-    produced whenever any variant can render. What was dropped is reported in
-    ``notes`` — never hidden. Only the last error is surfaced if all variants fail.
+    Tries full fidelity first, then — only for what's actually broken — a libass-
+    free caption renderer (drawtext), then silence, then no captions. A finished
+    video is produced whenever any variant can render; what changed is reported in
+    ``notes`` and never hidden. Only the last error surfaces if every variant fails.
     """
     ff = _resolve_ffmpeg(ffmpeg)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     last_rc, last_stderr, last_cmd = 1, "", [ff]
-    for variant, note in _degradations(graph):
-        rc, stderr, cmd = _run_once(variant, output_path, ff, timeout)
+    for variant, caption_mode, note in _attempts(graph):
+        rc, stderr, cmd = _run_once(variant, output_path, ff, timeout, caption_mode)
         if rc == 0:
             return RenderResult(output_path, cmd, variant.total_us, rc, notes=note)
         last_rc, last_stderr, last_cmd = rc, stderr, cmd
