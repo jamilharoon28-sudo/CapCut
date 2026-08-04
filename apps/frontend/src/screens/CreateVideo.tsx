@@ -13,6 +13,7 @@ export function CreateVideo() {
   const [folder, setFolder] = useState("");
   const [seconds, setSeconds] = useState(20);
   const [maxClips, setMaxClips] = useState(8);
+  const [mode, setMode] = useState("auto");
   const [captions, setCaptions] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [chosen, setChosen] = useState<string | null>(null);
@@ -28,9 +29,11 @@ export function CreateVideo() {
     try {
       const project = await api.createProject("New video");
       const capLines = captions.split("\n").map((s) => s.trim()).filter(Boolean);
-      const { job_id } = await api.autocreate(
-        project.id, folder.trim(), seconds, capLines.length ? capLines : undefined, maxClips,
-      );
+      const { job_id } = await api.autocreate(project.id, folder.trim(), seconds, {
+        captions: capLines.length ? capLines : undefined,
+        maxClips,
+        mode,
+      });
       setPhase("rendering");
       setStage("Coach is building three edits…");
       pollRef.current = window.setInterval(async () => {
@@ -150,6 +153,23 @@ export function CreateVideo() {
           <span className="muted" style={{ fontSize: 13 }}>
             In Finder, right-click the folder → <strong>Copy as Pathname</strong>, then paste here.
             Use a folder for one video — not your whole Downloads.
+          </span>
+        </label>
+        <label style={{ display: "grid", gap: 6 }}>
+          <span>What kind of video is this?</span>
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+            style={{ minHeight: 44, borderRadius: 12, border: "1px solid var(--hairline)",
+                     padding: "0 12px", font: "inherit", background: "var(--surface)" }}
+          >
+            <option value="auto">Let Coach decide (recommended)</option>
+            <option value="montage">Montage / B-roll (no talking)</option>
+            <option value="talking">Talking to camera (cut by speech)</option>
+          </select>
+          <span className="muted" style={{ fontSize: 13 }}>
+            Talking mode keeps your best takes and cuts the “ums” — it needs the one-time
+            speech setup (<code>scripts/setup-whisper.sh</code>).
           </span>
         </label>
         <label style={{ display: "grid", gap: 6 }}>

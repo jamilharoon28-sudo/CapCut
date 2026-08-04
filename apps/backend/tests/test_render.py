@@ -37,6 +37,18 @@ def test_command_is_argv_and_scales_to_canvas(tmp_path):
     assert "libx264" in cmd and "aac" in cmd
 
 
+def test_reframe_offset_shifts_crop(tmp_path):
+    from capcut_coach.render.graph import RenderClip, RenderGraph
+    from capcut_coach.schemas.edit_plan import Canvas
+
+    clip = RenderClip(asset_path=tmp_path / "a.mp4", source_start_us=0,
+                      source_duration_us=2_000_000, timeline_start_us=0, crop_x_norm=0.5)
+    graph = RenderGraph(schema_version=1, canvas=Canvas(), clips=[clip], style=CLEAN)
+    joined = " ".join(build_command(graph, tmp_path / "o.mp4", ass_path=None))
+    # A non-zero reframe uses the offset crop expression (not the plain centre).
+    assert "crop=1080:1920:(in_w-1080)/2*(1+0.500)" in joined
+
+
 def test_missing_audio_gets_silence(tmp_path):
     paths = {"a1": tmp_path / "a1.mp4", "a2": tmp_path / "a2.mp4"}
     graph = graph_from_edit_plan(_plan(), paths, style=CLEAN,

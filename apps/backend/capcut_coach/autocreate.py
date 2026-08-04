@@ -137,29 +137,41 @@ def cold_start_plan(
     captions: list[str] | None = None,
     max_clips: int = DEFAULT_MAX_CLIPS,
     per_clip_us: int | None = None,
+    analyses: dict[str, object] | None = None,
 ) -> EditPlan:
     """Sequence clips into a watchable montage near the target duration.
 
     Cold-start defaults (doc 16 §3): distinct opening, clean cuts, each shot on
-    screen 2–5 s. A big folder is *sampled* down to ``max_clips`` so unrelated
-    junk drawers don't produce a one-frame-per-clip flicker. Point Coach at the
-    clips for ONE video for a coherent result.
+    screen 2–5 s. A big folder is *sampled* down to ``max_clips``. When per-clip
+    visual ``analyses`` are supplied, each shot starts on its best moment and is
+    reframed on the subject (``transform.x``), and clips are ordered by quality
+    so the strongest shot opens.
     """
     if not catalog:
         raise ValueError("no usable video clips found in the folder")
+    analyses = analyses or {}
     chosen = _select_clips(catalog, max_clips)
+    # Order by analysed quality (best first) when we have it — a stronger opening.
+    if analyses:
+        chosen = sorted(chosen, key=lambda a: -getattr(analyses.get(a.id), "score", 0.0))
     if per_clip_us is None:
         per_clip_us = max(MIN_SHOT_US, min(MAX_SHOT_US, target_us // max(1, len(chosen))))
+
+    from .schemas.edit_plan import Transform
 
     segments: list[Segment] = []
     caption_events: list[Caption] = []
     cursor = 0
     for i, asset in enumerate(chosen):
-        lead_in = min(int(0.3 * SECOND_US), asset.duration_us // 10)
+        an = analyses.get(asset.id)
+        default_lead = min(int(0.3 * SECOND_US), asset.duration_us // 10)
+        lead_in = getattr(an, "best_start_us", default_lead)
+        lead_in = max(0, min(lead_in, max(0, asset.duration_us - MIN_SHOT_US)))
         seg_dur = min(per_clip_us, asset.duration_us - lead_in)
-        if seg_dur <= 0:  # clip shorter than the lead-in: use the whole clip
+        if seg_dur <= 0:  # clip shorter than the window: use the whole clip
             seg_dur = asset.duration_us
             lead_in = 0
+        crop_x = float(getattr(an, "crop_x_norm", 0.0))
         seg = Segment(
             id=f"seg_{uuid.uuid4().hex[:12]}",
             asset_id=asset.id,
@@ -168,8 +180,9 @@ def cold_start_plan(
             timeline_start_us=cursor,
             timeline_duration_us=seg_dur,
             role="hook" if i == 0 else "point",
-            reason="cold_start_sequence",
-            confidence=0.5,
+            reason="best_moment" if an is not None else "cold_start_sequence",
+            confidence=float(getattr(an, "score", 0.5)),
+            transform=Transform(scale=1.0, x=crop_x, y=0.0),
         )
         segments.append(seg)
         if captions and i < len(captions):
@@ -196,6 +209,8 @@ def autocreate(
     target_seconds: float = 20.0,
     captions: list[str] | None = None,
     max_clips: int = DEFAULT_MAX_CLIPS,
+    mode: str = "auto",          # auto | montage | talking
+    smart: bool = True,          # visual moment-picking + subject reframe
     ffmpeg: str | None = None,
     ffprobe: str | None = None,
 ) -> list[AutoCreateResult]:
@@ -211,9 +226,36 @@ def autocreate(
     catalog = build_catalog(media_dir, ff, fp)
     if not catalog:
         raise RuntimeError(f"no video clips found in {media_dir}")
-    plan = cold_start_plan(catalog, project_id=project_id,
-                           target_us=int(target_seconds * SECOND_US), captions=captions,
-                           max_clips=max_clips)
+
+    target_us = int(target_seconds * SECOND_US)
+
+    # Understand the footage: pick each clip's best moment + subject reframe.
+    analyses: dict = {}
+    if smart:
+        from .analysis.visual import analyse_clip, cv2_available
+        if cv2_available():
+            for a in catalog:
+                try:
+                    analyses[a.id] = analyse_clip(a.path, a.duration_us, ff)
+                except Exception:
+                    pass
+
+    plan = None
+    # Talking-head mode: keep good spoken lines, cut fillers; captions = real words.
+    if mode in ("auto", "talking"):
+        from .talking import build_talking_plan, resolve_transcriber
+        transcriber = resolve_transcriber()
+        if transcriber is not None:
+            plan = build_talking_plan(catalog, transcriber=transcriber, project_id=project_id,
+                                      target_us=target_us, ffmpeg=ff, analyses=analyses)
+        elif mode == "talking":
+            raise RuntimeError(
+                "Talking-head mode needs a whisper.cpp model. Run scripts/setup-whisper.sh, "
+                "then set COACH_WHISPER_MODEL.")
+
+    if plan is None:  # montage (also the fallback when there is too little speech)
+        plan = cold_start_plan(catalog, project_id=project_id, target_us=target_us,
+                               captions=captions, max_clips=max_clips, analyses=analyses)
     asset_paths = {a.id: a.path for a in catalog}
     has_audio = {a.id: a.has_audio for a in catalog}
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -237,10 +279,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seconds", type=float, default=20.0)
     ap.add_argument("--max-clips", type=int, default=DEFAULT_MAX_CLIPS,
                     help="most shots to include (default 8)")
+    ap.add_argument("--mode", choices=["auto", "montage", "talking"], default="auto",
+                    help="auto picks talking-head cutting when speech + a whisper model exist")
+    ap.add_argument("--no-smart", action="store_true",
+                    help="disable visual moment-picking and subject reframe")
     args = ap.parse_args(argv)
     try:
         results = autocreate(args.media_dir, args.out, target_seconds=args.seconds,
-                             max_clips=args.max_clips)
+                             max_clips=args.max_clips, mode=args.mode, smart=not args.no_smart)
     except (RuntimeError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2

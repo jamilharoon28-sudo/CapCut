@@ -31,8 +31,10 @@ copy source from a repository without an explicit compatible license.
 
 Optional / lazy-imported (feature-gated, not required to start):
 `python-docx` (MIT), `pypdf` (BSD), `scenedetect` (BSD-3-Clause),
-`numpy` (BSD-3-Clause). Each is imported only when its feature runs, so the app
-starts and passes core tests without them.
+`numpy` (BSD-3-Clause), `opencv-python-headless` (Apache-2.0 — footage analysis:
+best-moment + subject reframe via bundled Haar cascades; no network, no model
+download). Each is imported only when its feature runs, so the app starts and
+passes core tests without them.
 
 ## JavaScript (frontend)
 

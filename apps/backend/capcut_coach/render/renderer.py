@@ -68,14 +68,26 @@ def build_command(
         inputs += ["-ss", f"{clip.source_start_s:.3f}", "-t", f"{clip.duration_s:.3f}",
                    "-i", str(clip.asset_path)]
         vlabel = f"v{idx}"
+        # Subject reframe: shift the crop window horizontally by crop_x_norm.
+        # k=0 centres; the (in_w-ow) term is ~0 for portrait sources, so this is
+        # a safe no-op when there is no horizontal room.
+        k = max(-1.0, min(1.0, clip.crop_x_norm))
+        crop_x = f"(in_w-{cw})/2*(1+{k:.3f})" if abs(k) > 1e-3 else f"(in_w-{cw})/2"
         vchain = (
             f"[{idx}:v]scale={cw}:{ch}:force_original_aspect_ratio=increase,"
-            f"crop={cw}:{ch},setsar=1,fps={fps}"
+            f"crop={cw}:{ch}:{crop_x}:(in_h-{ch})/2,setsar=1,fps={fps}"
         )
         if (style.contrast, style.brightness, style.saturation) != (1.0, 0.0, 1.0):
             vchain += (
                 f",eq=contrast={style.contrast}:brightness={style.brightness}"
                 f":saturation={style.saturation}"
+            )
+        if clip.ken_burns:
+            # Slow push-in to ~106% over the clip; zoompan drives per-output-frame.
+            frames = max(1, round(clip.duration_s * fps))
+            vchain += (
+                f",zoompan=z='min(zoom+0.0006,1.06)':d={frames}"
+                f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={cw}x{ch}:fps={fps}"
             )
         vchain += f"[{vlabel}]"
         filters.append(vchain)

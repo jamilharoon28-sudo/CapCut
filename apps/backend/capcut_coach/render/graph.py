@@ -25,18 +25,22 @@ class RenderStyle:
     brightness: float = 0.0
     saturation: float = 1.0
     loudnorm: bool = True          # normalise dialogue loudness
+    ken_burns: bool = False        # gentle push-in for life on static shots
     caption_fill: str = "&H00FFFFFF"   # ASS colour (white)
     caption_outline: str = "&H00000000"  # black outline
     accent: str = "#6D5DFB"
 
 
-CLEAN = RenderStyle(name="clean", captions=False, loudnorm=True)
+# Ken Burns is kept as an off-by-default option; the zoompan path needs more
+# tuning before it is reliable/fast enough to ship on by default.
+CLEAN = RenderStyle(name="clean", captions=False, loudnorm=True, ken_burns=False)
 ENHANCED = RenderStyle(
     name="enhanced", captions=True, contrast=1.06, saturation=1.08, loudnorm=True,
+    ken_burns=False,
 )
 BOLD = RenderStyle(
     name="bold", captions=True, contrast=1.12, saturation=1.18, brightness=0.02,
-    loudnorm=True, caption_fill="&H0000E1FF",  # amber emphasis
+    loudnorm=True, ken_burns=False, caption_fill="&H0000E1FF",  # amber emphasis
 )
 
 STYLES = {"clean": CLEAN, "enhanced": ENHANCED, "bold": BOLD}
@@ -50,6 +54,8 @@ class RenderClip:
     timeline_start_us: int
     has_audio: bool = True
     role: str = "point"
+    crop_x_norm: float = 0.0   # subject reframe: -1 left .. 0 centre .. +1 right
+    ken_burns: bool = False    # gentle push-in for life on static shots
     provenance: dict = field(default_factory=dict)
 
     @property
@@ -105,6 +111,8 @@ def graph_from_edit_plan(
                 timeline_start_us=seg.timeline_start_us,
                 has_audio=asset_has_audio.get(seg.asset_id, True),
                 role=seg.role,
+                crop_x_norm=float(seg.transform.x),   # reframe offset carried in transform.x
+                ken_burns=style.ken_burns,
                 provenance={"segment_id": seg.id, "reason": seg.reason,
                             "confidence": seg.confidence},
             )

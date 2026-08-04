@@ -4,7 +4,7 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 
 cd "$here/apps/backend"
-[[ -d .venv ]] || { uv venv --python 3.12 .venv && uv pip install -e ".[dev,scripts,media]"; }
+[[ -d .venv ]] || { uv venv --python 3.12 .venv && uv pip install -e ".[dev,scripts,media,vision]"; }
 # shellcheck disable=SC1091
 source .venv/bin/activate
 COACH_PORT="${COACH_PORT:-8787}" python -m capcut_coach &

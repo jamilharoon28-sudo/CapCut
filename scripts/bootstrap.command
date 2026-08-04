@@ -17,7 +17,7 @@ fi
 # 2) Backend venv + deps
 cd "$here/apps/backend"
 uv venv --python 3.12 .venv
-uv pip install -e ".[dev,scripts,media]"
+uv pip install -e ".[dev,scripts,media,vision]"
 
 # 3) Frontend deps (if pnpm available)
 cd "$here/apps/frontend"
