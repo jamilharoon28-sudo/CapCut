@@ -93,6 +93,7 @@ class RenderGraph:
     project_id: str = ""
     edit_plan_id: str = ""
     music_path: Path | None = None   # music bed; replaces clip audio for montages
+    duck_music: bool = False         # keep clip voice, duck music under it (hybrid)
     outro: Outro | None = None
 
     @property

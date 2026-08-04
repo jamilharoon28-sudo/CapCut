@@ -118,12 +118,49 @@ def build_command(
 
     total_s = graph.clips_total_us / 1_000_000 + outro_secs
 
-    # Audio: a music bed (montage) replaces clip audio; otherwise concat clip audio.
-    if graph.music_path is not None:
+    # Audio: music bed (montage), music ducked under voice (hybrid), or clip audio.
+    fade_start = max(0.0, total_s - 0.8)
+    if graph.music_path is not None and graph.duck_music and any(c.has_audio for c in graph.clips):
+        # Hybrid: keep the spoken voice from the clips; duck the music beneath it
+        # with a sidechain compressor keyed by the voice, then mix (dialogue leads).
+        need_silence = any(not c.has_audio for c in graph.clips) or graph.outro is not None
+        silence_idx: int | None = None
+        if need_silence:
+            inputs += ["-f", "lavfi", "-t", f"{total_s:.3f}",
+                       "-i", "anullsrc=r=48000:cl=stereo"]
+            silence_idx = idx
+            idx += 1
+        voice_parts: list[str] = []
+        for ci, clip in enumerate(graph.clips):
+            src = f"[{clip_audio_indexes[ci]}:a]" if clip.has_audio else f"[{silence_idx}:a]"
+            filters.append(
+                f"{src}aformat=sample_rates=48000:channel_layouts=stereo,"
+                f"atrim=0:{clip.duration_s:.3f},asetpts=PTS-STARTPTS[dv{ci}]")
+            voice_parts.append(f"[dv{ci}]")
+        if graph.outro is not None:
+            filters.append(
+                f"[{silence_idx}:a]atrim=0:{outro_secs:.3f},asetpts=PTS-STARTPTS[dvo]")
+            voice_parts.append("[dvo]")
+        filters.append(f"{''.join(voice_parts)}concat=n={len(voice_parts)}:v=0:a=1[voice]")
+        filters.append("[voice]asplit=2[voice_mix][voice_key]")
         inputs += ["-i", str(graph.music_path)]
         music_idx = idx
         idx += 1
-        fade_start = max(0.0, total_s - 0.8)
+        filters.append(
+            f"[{music_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,"
+            f"atrim=0:{total_s:.3f},apad=whole_dur={total_s:.3f},"
+            f"afade=t=out:st={fade_start:.3f}:d=0.8,volume=0.6[musicbed]")
+        # Sidechain: compress the music (main) using the voice as the key.
+        filters.append(
+            "[musicbed][voice_key]sidechaincompress=threshold=0.03:ratio=8:"
+            "attack=15:release=350[ducked]")
+        filters.append(
+            "[voice_mix][ducked]amix=inputs=2:duration=first:dropout_transition=0,"
+            "loudnorm=I=-14:TP=-1.0:LRA=11[aout]")
+    elif graph.music_path is not None:
+        inputs += ["-i", str(graph.music_path)]
+        music_idx = idx
+        idx += 1
         filters.append(
             f"[{music_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,"
             f"atrim=0:{total_s:.3f},afade=t=out:st={fade_start:.3f}:d=0.8,"

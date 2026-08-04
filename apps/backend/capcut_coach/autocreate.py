@@ -199,6 +199,7 @@ class AutoCreateResult:
     output_path: Path
     ok: bool
     detail: str
+    qc: list[dict] | None = None   # loudness / true-peak QC findings (may be empty)
 
 
 def autocreate(
@@ -256,13 +257,15 @@ def autocreate(
                     pass
 
     plan = None
+    voice_led = False
     # Talking-head mode: keep good spoken lines, cut fillers; captions = real words.
-    if mode in ("auto", "talking") and music is None:
+    if mode in ("auto", "talking"):
         from .talking import build_talking_plan, resolve_transcriber
         transcriber = resolve_transcriber()
         if transcriber is not None:
             plan = build_talking_plan(catalog, transcriber=transcriber, project_id=project_id,
                                       target_us=target_us, ffmpeg=ff, analyses=analyses)
+            voice_led = plan is not None
         elif mode == "talking":
             raise RuntimeError(
                 "Talking-head mode needs a whisper.cpp model. Run scripts/setup-whisper.sh, "
@@ -293,6 +296,8 @@ def autocreate(
         # Attach the soundtrack + branded ending to every candidate.
         if music is not None:
             cand.graph.music_path = music
+            # Hybrid: when the edit is voice-led, duck the music under speech.
+            cand.graph.duck_music = voice_led
         if outro is not None:
             cand.graph.outro = outro
 
@@ -305,14 +310,21 @@ def autocreate(
         chosen = next((c for c in candidates if c.name == decision.chosen), candidates[0])
         to_render = [chosen]
 
+    from .media.audioqc import loudness_findings, measure_loudness
+
     results: list[AutoCreateResult] = []
     for cand in to_render:
         out_path = out_dir / f"{cand.name}.mp4"
         r = render_graph(cand.graph, out_path, ffmpeg=ff)
+        ok = r.returncode == 0 and out_path.exists()
+        qc: list[dict] = []
+        if ok:
+            # EBU R128 loudness / true-peak gate on the finished file.
+            findings = loudness_findings(measure_loudness(out_path, ff))
+            qc = [f.to_public() for f in findings]
         results.append(AutoCreateResult(
             candidate_name=cand.name, output_path=out_path,
-            ok=(r.returncode == 0 and out_path.exists()),
-            detail="ok" if r.returncode == 0 else r.stderr_tail,
+            ok=ok, detail="ok" if r.returncode == 0 else r.stderr_tail, qc=qc,
         ))
     return results
 
