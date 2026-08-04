@@ -59,6 +59,18 @@ export const api = {
         music_path: opts?.musicPath || null, logo_path: opts?.logoPath || null,
       }),
     }),
+  makeMyVideo: (
+    pid: string, mediaDir: string, targetSeconds: number,
+    opts?: { captions?: string[]; mode?: string; musicPath?: string; logoPath?: string },
+  ) =>
+    req<{ job_id: string }>(`/projects/${pid}/make-my-video`, {
+      method: "POST",
+      body: JSON.stringify({
+        media_dir: mediaDir, target_seconds: targetSeconds,
+        captions: opts?.captions, mode: opts?.mode,
+        music_path: opts?.musicPath || null, logo_path: opts?.logoPath || null,
+      }),
+    }),
   job: (id: string) => req<Job>(`/jobs/${id}`),
   candidates: (pid: string) => req<{ candidates: Candidate[] }>(`/projects/${pid}/candidates`),
   preflight: (

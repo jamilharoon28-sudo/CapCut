@@ -108,6 +108,48 @@ async def start_autocreate(pid: str, body: AutoCreateBody, request: Request) -> 
     return {"job_id": job.id}
 
 
+@router.post("/projects/{pid}/make-my-video", status_code=202)
+async def make_my_video(pid: str, body: AutoCreateBody, request: Request) -> dict:
+    """Full Autopilot (doc 20): auto-pick rights-approved music + best candidate."""
+    state = request.app.state.coach
+    if not state.projects.get(pid):
+        raise HTTPException(404, {"code": "not_found", "message": "Project not found."})
+    raw = Path(body.media_dir).expanduser().resolve(strict=False)
+    if not raw.is_dir() and not (raw.is_file() and raw.suffix.lower() == ".zip"):
+        raise HTTPException(400, {"code": "bad_folder", "message": "That folder wasn't found."})
+    if is_cloud_path(raw):
+        raise HTTPException(400, {"code": "cloud_readonly",
+                                  "message": "Cloud/synced folders are read-only."})
+    music_roots = list(state.config.get("approved_music_roots") or [])
+
+    job = state.jobs.enqueue(type="make_my_video", project_id=pid, heavy=True)
+
+    def _worker() -> None:
+        out_dir = state.layout.project_dir(pid) / "candidates"
+        try:
+            state.jobs.transition(job.id, JobState.RUNNING, stage="rendering", percent=5)
+            results = autocreate(
+                raw, out_dir, project_id=pid, target_seconds=body.target_seconds,
+                captions=body.captions, mode=body.mode,
+                music=Path(body.music_path) if body.music_path else None,
+                logo=Path(body.logo_path) if body.logo_path else None,
+                approved_music_roots=music_roots or None, make_my_video=True)
+            manifest = [{"name": r.candidate_name, "file": r.output_path.name, "ok": r.ok,
+                         "detail": r.detail} for r in results]
+            (out_dir / "candidates.json").write_text(json.dumps(manifest, indent=2), "utf-8")
+            ok = bool(results) and all(r.ok for r in results)
+            state.jobs.transition(job.id, JobState.SUCCEEDED if ok else JobState.FAILED,
+                                  stage="done" if ok else "render_error", percent=100,
+                                  error_code=None if ok else "render_failed")
+        except Exception as e:
+            state.jobs.transition(job.id, JobState.FAILED, error_code="autopilot_error",
+                                  error_detail=str(e)[:400])
+
+    threading.Thread(target=_worker, daemon=True).start()
+    state.projects.update(pid, step="edit", status="rendering")
+    return {"job_id": job.id}
+
+
 class PreflightBody(BaseModel):
     media_dir: str
     captions: list[str] | None = None

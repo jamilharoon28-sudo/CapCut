@@ -37,6 +37,26 @@ implemented + tested · 🟡 partial · ⬜ next.
 | Claude as constrained semantic matcher | `claude/` provider exists | — | 🟡 wiring next |
 | Learn/reuse stable owner choices | `config.py` (config store exists) | — | ⬜ |
 
+## Doc 20 — Full Autopilot (Music / Footage / Captions)
+
+| Requirement | Code | Test | Status |
+| --- | --- | --- | --- |
+| Rights-gated Approved Music library (content-hash + Audio DNA) | `music/library.py`, `music/schemas.py` | `test_music_autopilot::test_only_rights_eligible_...` | ✅ |
+| Only rights-eligible tracks auto-selectable | `music/schemas.py::MusicAsset.eligible`, `select.py` | `test_only_rights_eligible_tracks_are_selectable` | ✅ |
+| Reproducible selection + two alternatives + reason | `music/select.py` | `test_selection_is_reproducible_and_offers_alternatives` | ✅ |
+| Dialogue edits avoid vocal tracks | `music/select.py` | `test_dialogue_edit_avoids_vocal_tracks` | ✅ |
+| No network / music-ripping code path | `music/*` (by design) | `test_music_module_has_no_network_or_download_code` | ✅ |
+| Missing music never blocks a viable edit | `preflight/engine.py`, `autocreate.py` | `test_preflight::test_missing_logo_and_music_...` | ✅ |
+| Automatic best-candidate selection (AutopilotDecision) | `autopilot/select.py`, `schemas.py` | `test_choose_best_prefers_richer_candidate` | ✅ |
+| Make My Video renders only the chosen best | `autocreate.py` (`make_my_video`), `routers/create.py` | end-to-end (evidence) | ✅ |
+| Music bed mixed to −14 LUFS / −1 dBTP, faded | `render/renderer.py` | `test_audio_montage::test_render_command_music_bed_and_outro` | ✅ |
+| One-screen Make My Video UI | `apps/frontend/.../CreateVideo.tsx`, `api.ts` | typecheck + build | ✅ |
+| Automatic dialogue ducking (sidechain) | — | — | 🟡 |
+| Global footage optimiser: 2 alternatives per beat + swap | `montage.py` (rotation) | — | 🟡 |
+| Grouped factual review (low-confidence names/prices/dates) | — | — | 🟡 |
+| Trusted Autopilot after 5 safe jobs | — | — | 🟡 |
+| Word-level captions monotonic/in-bounds/non-overlapping | `media/srt.py`, `talking.py` | `test_media_scripts_capcut::test_srt_*` | ✅ |
+
 ## Safety invariants (unchanged, still enforced)
 Loopback + bearer token; path-safety / cloud read-only; no fabricated
 footage/claims/logos; local + zero-additional-cost (no Remotion / paid APIs);

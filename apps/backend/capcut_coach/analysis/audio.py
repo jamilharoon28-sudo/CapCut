@@ -29,6 +29,8 @@ class AudioDNA:
     tempo_bpm: float
     beat_times_s: list[float] = field(default_factory=list)
     onset_times_s: list[float] = field(default_factory=list)
+    energy: float = 0.0        # 0..1 overall loudness/energy (RMS-derived)
+    has_vocals_hint: bool = False  # coarse hint; not a guarantee
 
     def phrase_cuts_s(self, phrase_seconds: float, until_s: float) -> list[float]:
         """Cut points on a musical phrase grid (~every N beats), snapped to beats.
@@ -77,11 +79,16 @@ def analyse_audio(path: Path, ffmpeg: str) -> AudioDNA | None:
     onset_frames = librosa.onset.onset_detect(y=y, sr=sr, backtrack=True)
     onset_times = librosa.frames_to_time(onset_frames, sr=sr)
     tempo_val = float(np.atleast_1d(tempo)[0])
+    # Energy: mean RMS mapped to ~0..1 (‑40 dBFS→0, 0 dBFS→1).
+    rms = float(np.sqrt(np.mean(np.square(y)))) if y.size else 0.0
+    db = 20.0 * np.log10(rms + 1e-9)
+    energy = float(min(1.0, max(0.0, (db + 40.0) / 40.0)))
     return AudioDNA(
         duration_s=duration,
         tempo_bpm=round(tempo_val, 1),
         beat_times_s=[round(float(t), 3) for t in beat_times],
         onset_times_s=[round(float(t), 3) for t in onset_times],
+        energy=round(energy, 3),
     )
 
 

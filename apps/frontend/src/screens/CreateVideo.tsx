@@ -63,21 +63,23 @@ export function CreateVideo() {
 
   useEffect(() => () => { if (pollRef.current) window.clearInterval(pollRef.current); }, []);
 
-  async function start() {
+  async function start(autopilot = false) {
     setError(null);
     if (!folder.trim()) { setError("Paste the full path to a folder of video clips."); return; }
     try {
       const project = await api.createProject("New video");
       const capLines = captions.split("\n").map((s) => s.trim()).filter(Boolean);
-      const { job_id } = await api.autocreate(project.id, folder.trim(), seconds, {
+      const opts = {
         captions: capLines.length ? capLines : undefined,
-        maxClips,
         mode,
         musicPath: musicPath.trim() || undefined,
         logoPath: logoPath.trim() || undefined,
-      });
+      };
+      const { job_id } = autopilot
+        ? await api.makeMyVideo(project.id, folder.trim(), seconds, opts)
+        : await api.autocreate(project.id, folder.trim(), seconds, { ...opts, maxClips });
       setPhase("rendering");
-      setStage("Coach is building three edits…");
+      setStage(autopilot ? "Coach is making your video…" : "Coach is building three edits…");
       pollRef.current = window.setInterval(async () => {
         const job = await api.job(job_id);
         setStage(job.stage === "rendering" ? "Rendering your candidates…" : job.stage ?? "Working…");
@@ -263,12 +265,17 @@ export function CreateVideo() {
           />
         </label>
         {readiness && <ReadinessPanel r={readiness} />}
-        <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <button onClick={check} disabled={checking}>
             {checking ? "Checking…" : "Check what I need"}
           </button>
-          <button className="primary" onClick={start}>Create my videos</button>
+          <button onClick={() => start(false)}>Review 3 versions</button>
+          <button className="primary" onClick={() => start(true)}>Make My Video</button>
         </div>
+        <p className="muted" style={{ fontSize: 13, margin: 0 }}>
+          <b>Make My Video</b> picks the best version (and a rights-approved track from your
+          Music folder, if set) automatically. <b>Review 3 versions</b> lets you choose.
+        </p>
       </div>
     </section>
   );

@@ -23,6 +23,7 @@ CONFIG_SCHEMA_VERSION = 1
 DEFAULT_CONFIG: dict[str, Any] = {
     "schema_version": CONFIG_SCHEMA_VERSION,
     "approved_media_roots": [],
+    "approved_music_roots": [],
     "capcut_project_roots": [],
     "export_roots": [],
     "processing_mode": "balanced",

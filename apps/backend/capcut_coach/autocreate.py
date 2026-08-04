@@ -214,6 +214,8 @@ def autocreate(
     music: Path | None = None,   # music track → beat-synced montage + soundtrack
     logo: Path | None = None,    # logo image → branded outro
     phrase_seconds: float = 2.0,
+    approved_music_roots: list[str] | None = None,  # auto-pick a rights-approved track
+    make_my_video: bool = False,  # render only the auto-chosen best candidate
     ffmpeg: str | None = None,
     ffprobe: str | None = None,
 ) -> list[AutoCreateResult]:
@@ -231,6 +233,16 @@ def autocreate(
         raise RuntimeError(f"no video clips found in {media_dir}")
 
     target_us = int(target_seconds * SECOND_US)
+
+    # Autopilot: auto-select a rights-approved music track when none was supplied.
+    music_choice = None
+    if music is None and approved_music_roots:
+        from .music import index_music, select_music
+        assets = index_music(approved_music_roots, ff)
+        music_choice = select_music(assets, target_seconds=target_seconds,
+                                    avoid_vocals=(mode == "talking"))
+        if music_choice.chosen is not None:
+            music = Path(music_choice.chosen.path)
 
     # Understand the footage: pick each clip's best moment + subject reframe.
     analyses: dict = {}
@@ -276,13 +288,25 @@ def autocreate(
     from .render.graph import Outro
     outro = Outro(logo_path=logo) if logo is not None else None
 
-    results: list[AutoCreateResult] = []
-    for cand in build_candidates(plan, asset_paths, asset_has_audio=has_audio):
+    candidates = build_candidates(plan, asset_paths, asset_has_audio=has_audio)
+    for cand in candidates:
         # Attach the soundtrack + branded ending to every candidate.
         if music is not None:
             cand.graph.music_path = music
         if outro is not None:
             cand.graph.outro = outro
+
+    # Full Autopilot: score the graphs and render ONLY the best safe candidate
+    # (doc 20 §6 — don't waste storage rendering every full-res version).
+    to_render = candidates
+    if make_my_video:
+        from .autopilot import choose_best
+        decision = choose_best(candidates)
+        chosen = next((c for c in candidates if c.name == decision.chosen), candidates[0])
+        to_render = [chosen]
+
+    results: list[AutoCreateResult] = []
+    for cand in to_render:
         out_path = out_dir / f"{cand.name}.mp4"
         r = render_graph(cand.graph, out_path, ffmpeg=ff)
         results.append(AutoCreateResult(
@@ -310,15 +334,22 @@ def main(argv: list[str] | None = None) -> int:
                     help="logo image → a branded outro")
     ap.add_argument("--captions", type=Path, default=None,
                     help="text file, one narrative line per shot")
+    ap.add_argument("--music-library", type=Path, default=None,
+                    help="a folder of rights-approved tracks Coach may auto-select from")
+    ap.add_argument("--make-my-video", action="store_true",
+                    help="render only the auto-chosen best candidate (Full Autopilot)")
     args = ap.parse_args(argv)
     caption_lines = None
     if args.captions and args.captions.exists():
         caption_lines = [ln.strip() for ln in args.captions.read_text("utf-8").splitlines()
                          if ln.strip()]
+    music_roots = [str(args.music_library)] if args.music_library else None
     try:
         results = autocreate(args.media_dir, args.out, target_seconds=args.seconds,
                              max_clips=args.max_clips, mode=args.mode, smart=not args.no_smart,
-                             music=args.music, logo=args.logo, captions=caption_lines)
+                             music=args.music, logo=args.logo, captions=caption_lines,
+                             approved_music_roots=music_roots,
+                             make_my_video=args.make_my_video)
     except (RuntimeError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
