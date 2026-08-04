@@ -38,13 +38,18 @@ def analyse_asset(
 
 
 def analyse_folder(media_dir: Path) -> dict:
-    """Analyse every clip and rank windows against the project baseline."""
-    from ..autocreate import build_catalog
+    """Analyse every clip and rank windows against the project baseline.
+
+    Accepts a folder of clips or a ``.zip`` of clips (extracted safely, read-only).
+    """
+    from ..autocreate import _extract_zip_of_media, build_catalog
     from ..toolpaths import ffmpeg_path, ffprobe_path
 
     ff = ffmpeg_path()
     if not ff:
         raise RuntimeError("ffmpeg not found (brew install ffmpeg)")
+    if media_dir.is_file() and media_dir.suffix.lower() == ".zip":
+        media_dir = _extract_zip_of_media(media_dir)
     catalog = build_catalog(media_dir, ff, ffprobe_path())
     if not catalog:
         raise RuntimeError(f"no video clips found in {media_dir}")
