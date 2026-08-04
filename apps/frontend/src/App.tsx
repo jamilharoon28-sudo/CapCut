@@ -3,8 +3,9 @@ import { useEffect, useState } from "react";
 import { api, type Project } from "./api";
 import { ProjectPath } from "./components/ProjectPath";
 import { Loading, StateCard } from "./components/States";
+import { CreateVideo } from "./screens/CreateVideo";
 
-const DESTINATIONS = ["Home", "Projects", "Learn My Style", "Connections", "Settings"] as const;
+const DESTINATIONS = ["Home", "Create", "Projects", "Learn My Style", "Connections", "Settings"] as const;
 type Destination = (typeof DESTINATIONS)[number];
 
 export default function App() {
@@ -41,7 +42,8 @@ export default function App() {
         ))}
       </nav>
       <main style={{ padding: 32, maxWidth: 880 }}>
-        {dest === "Home" && <Home onOpenProjects={() => setDest("Projects")} />}
+        {dest === "Home" && <Home onOpenProjects={() => setDest("Create")} />}
+        {dest === "Create" && <CreateVideo />}
         {dest === "Projects" && <Projects />}
         {dest === "Learn My Style" && <LearnMyStyle />}
         {dest === "Connections" && <Connections />}

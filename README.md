@@ -1,11 +1,21 @@
 # CapCut Coach
 
-A private, **local** editing assistant for one beginner using **CapCut Desktop
-Premium** on an **Apple-silicon M2 Mac**. It watches your CapCut and media
-folders, learns one universal editing style from paired raw/finished examples,
-prepares strong first cuts, transfers them into CapCut as safely as the installed
-CapCut version permits, teaches the remaining Premium steps one at a time,
-reviews exports, and learns from your corrections.
+A private, **local** editing assistant for one beginner on an **Apple-silicon M2
+Mac**. **Automation-first:** Coach turns a folder of raw clips (+ an optional
+script) into three finished vertical videos — **Clean / Enhanced / Bold** —
+rendered locally with FFmpeg. **CapCut is optional**, not required to get an MP4.
+It can also learn one universal editing style over time and prepare a safe CapCut
+handoff when you want to finish there.
+
+### Try it in one command (on the Mac, after setup)
+
+```bash
+python -m capcut_coach.autocreate ~/Movies/my-raw-clips --seconds 20
+# → coach-candidates/clean.mp4, enhanced.mp4, bold.mp4  (1080×1920, no CapCut)
+```
+
+Or use the app: **Create → paste a folder path → Create my videos** and play the
+three results in the window.
 
 > **Governing specification:** everything in this repository implements the
 > handover pack in [`CapCut-Coach-Claude-Code-Handover-Pack/`](CapCut-Coach-Claude-Code-Handover-Pack).

@@ -43,7 +43,13 @@ func supportDir() -> URL {
         .appendingPathComponent("CapCut Coach", isDirectory: true)
 }
 
-struct LaunchConfig: Decodable { let python: String; let backendDir: String; let frontendDist: String }
+struct LaunchConfig: Decodable {
+    let python: String
+    let backendDir: String
+    let frontendDist: String
+    let ffmpeg: String?
+    let ffprobe: String?
+}
 
 func loadConfig() -> LaunchConfig? {
     guard let res = Bundle.main.resourcePath else { return nil }
@@ -63,6 +69,12 @@ final class Backend {
         var env = ProcessInfo.processInfo.environment
         env["COACH_PORT"] = String(port)
         env["COACH_FRONTEND_DIST"] = config.frontendDist
+        // A GUI app does not inherit the shell PATH; make Homebrew tools findable
+        // and pass explicit ffmpeg/ffprobe paths recorded at build time.
+        let extraPaths = "/opt/homebrew/bin:/usr/local/bin"
+        env["PATH"] = extraPaths + ":" + (env["PATH"] ?? "/usr/bin:/bin")
+        if let ff = config.ffmpeg, !ff.isEmpty { env["COACH_FFMPEG"] = ff }
+        if let fp = config.ffprobe, !fp.isEmpty { env["COACH_FFPROBE"] = fp }
         process.environment = env
     }
     func start() throws { try process.run() }

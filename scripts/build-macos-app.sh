@@ -43,12 +43,22 @@ cat > "$contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 
+# Detect FFmpeg so the GUI app (which does NOT inherit your shell PATH) can find it.
+ffmpeg_path="$(command -v ffmpeg || true)"
+ffprobe_path="$(command -v ffprobe || true)"
+if [[ -z "$ffmpeg_path" ]]; then
+  echo "WARNING: ffmpeg not found on PATH. Install it with 'brew install ffmpeg'"
+  echo "         (the app builds, but video rendering needs FFmpeg)."
+fi
+
 # Runtime launch config (absolute paths for this Mac; not committed to git).
 cat > "$contents/Resources/launch.json" <<JSON
 {
   "python": "$python",
   "backendDir": "$here/apps/backend",
-  "frontendDist": "$contents/Resources/ui"
+  "frontendDist": "$contents/Resources/ui",
+  "ffmpeg": "$ffmpeg_path",
+  "ffprobe": "$ffprobe_path"
 }
 JSON
 

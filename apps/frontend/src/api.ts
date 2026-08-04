@@ -33,6 +33,9 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T;
 }
 
+export type Candidate = { name: string; file: string; ok: boolean; url: string; detail: string };
+export type Job = { id: string; state: string; stage: string | null; percent: number | null };
+
 export const api = {
   status: () => req<Record<string, unknown>>("/system/status"),
   doctor: () => req<{ checks: Record<string, DoctorCheck>; macos_only_checks_blocked: boolean }>(
@@ -43,4 +46,11 @@ export const api = {
   listProjects: () => req<{ projects: Project[] }>("/projects"),
   createProject: (title: string) =>
     req<Project>("/projects", { method: "POST", body: JSON.stringify({ title }) }),
+  autocreate: (pid: string, mediaDir: string, targetSeconds: number, captions?: string[]) =>
+    req<{ job_id: string }>(`/projects/${pid}/autocreate`, {
+      method: "POST",
+      body: JSON.stringify({ media_dir: mediaDir, target_seconds: targetSeconds, captions }),
+    }),
+  job: (id: string) => req<Job>(`/jobs/${id}`),
+  candidates: (pid: string) => req<{ candidates: Candidate[] }>(`/projects/${pid}/candidates`),
 };
