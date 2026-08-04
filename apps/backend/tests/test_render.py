@@ -51,6 +51,25 @@ def test_reframe_offset_shifts_crop(tmp_path):
     assert "crop=1080:1920:(in_w-1080)/2*(1+0.500)" in joined
 
 
+def test_rotation_bakes_in_transpose_and_disables_autorotate(tmp_path):
+    from capcut_coach.render.graph import RenderClip, RenderGraph
+    from capcut_coach.schemas.edit_plan import Canvas
+
+    def joined(rot: int) -> str:
+        clip = RenderClip(asset_path=tmp_path / "a.mov", source_start_us=0,
+                          source_duration_us=2_000_000, timeline_start_us=0, rotation=rot)
+        graph = RenderGraph(schema_version=1, canvas=Canvas(), clips=[clip], style=CLEAN)
+        return " ".join(build_command(graph, tmp_path / "o.mp4", ass_path=None))
+
+    # Portrait phone clips (rotate flag) are baked upright before scale/crop, and
+    # FFmpeg autorotation is disabled so we never double-rotate.
+    j90 = joined(90)
+    assert "-noautorotate" in j90 and "transpose=1,scale=1080:1920" in j90
+    assert "transpose=2,scale=1080:1920" in joined(270)
+    assert "transpose=1,transpose=1,scale=1080:1920" in joined(180)
+    assert "transpose=" not in joined(0)  # upright clips are untouched
+
+
 def test_missing_audio_gets_silence(tmp_path):
     paths = {"a1": tmp_path / "a1.mp4", "a2": tmp_path / "a2.mp4"}
     graph = graph_from_edit_plan(_plan(), paths, style=CLEAN,

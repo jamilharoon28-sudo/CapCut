@@ -25,10 +25,18 @@ from .render.candidates import build_candidates
 from .render.renderer import render_graph
 from .schemas.edit_plan import Caption, EditPlan, Segment
 
-VIDEO_EXTS = {".mov", ".mp4", ".m4v", ".avi", ".mkv"}
+# A broad set of common video containers. Anything FFmpeg can decode will render;
+# this list decides what Coach will *look at* in a folder.
+VIDEO_EXTS = {
+    ".mov", ".mp4", ".m4v", ".avi", ".mkv", ".webm", ".mpg", ".mpeg", ".m2v",
+    ".wmv", ".flv", ".f4v", ".3gp", ".3g2", ".mts", ".m2ts", ".ts", ".mxf",
+    ".ogv", ".vob", ".divx", ".dv", ".qt", ".asf", ".rm", ".rmvb",
+}
 SECOND_US = 1_000_000
 _DUR_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)")
 _AUDIO_RE = re.compile(r"Stream #\d+:\d+.*: Audio:")
+_ROTATE_TAG_RE = re.compile(r"rotate\s*:\s*(-?\d+)")
+_DISPLAYMATRIX_RE = re.compile(r"displaymatrix:\s*rotation of\s*(-?\d+(?:\.\d+)?)")
 
 
 @dataclass
@@ -37,25 +45,49 @@ class CatalogAsset:
     path: Path
     duration_us: int
     has_audio: bool
+    rotation: int = 0   # clockwise display rotation to bake in (0/90/180/270)
 
 
-def _probe(path: Path, ffmpeg: str, ffprobe: str | None) -> tuple[int, bool]:
-    """Return (duration_us, has_audio). Prefers ffprobe; falls back to ffmpeg -i."""
+def _norm_rotation(value: float) -> int:
+    """Snap any rotation angle to the nearest 0/90/180/270 (clockwise)."""
+    return int(round((value % 360) / 90.0) * 90) % 360
+
+
+def _probe(path: Path, ffmpeg: str, ffprobe: str | None) -> tuple[int, bool, int]:
+    """Return (duration_us, has_audio, rotation). Prefers ffprobe; falls back to ffmpeg -i."""
     if ffprobe:
         try:
+            import json as _json
+
+            entries = ("format=duration:stream=codec_type,duration,width,height:"
+                       "stream_tags=rotate:side_data=rotation")
             out = subprocess.run(
-                [ffprobe, "-v", "error", "-show_entries",
-                 "format=duration:stream=codec_type", "-of", "default=nw=1", str(path)],
+                [ffprobe, "-v", "error", "-print_format", "json",
+                 "-show_entries", entries, str(path)],
                 capture_output=True, text=True, timeout=60, check=False,
             ).stdout
-            dur = 0.0
-            has_audio = "codec_type=audio" in out
-            for line in out.splitlines():
-                if line.startswith("duration="):
-                    dur = float(line.split("=", 1)[1] or 0.0)
+            data = _json.loads(out or "{}")
+            streams = data.get("streams", [])
+            has_audio = any(s.get("codec_type") == "audio" for s in streams)
+            vstream = next((s for s in streams if s.get("codec_type") == "video"), None)
+            # Duration: prefer format, then the video stream.
+            dur = float(data.get("format", {}).get("duration") or 0.0)
+            if dur <= 0 and vstream is not None:
+                dur = float(vstream.get("duration") or 0.0)
+            rotation = 0
+            if vstream is not None:
+                tag = (vstream.get("tags") or {}).get("rotate")
+                if tag is not None:
+                    rotation = _norm_rotation(float(tag))
+                else:
+                    for sd in vstream.get("side_data_list", []) or []:
+                        if "rotation" in sd:
+                            # displaymatrix rotation is the negative of the visual CW rotation.
+                            rotation = _norm_rotation(-float(sd["rotation"]))
+                            break
             if dur > 0:
-                return int(dur * SECOND_US), has_audio
-        except (ValueError, subprocess.SubprocessError):
+                return int(dur * SECOND_US), has_audio, rotation
+        except (ValueError, KeyError, subprocess.SubprocessError):
             pass
     # Fallback: parse ffmpeg -i stderr.
     err = subprocess.run([ffmpeg, "-i", str(path)], capture_output=True, text=True,
@@ -65,7 +97,14 @@ def _probe(path: Path, ffmpeg: str, ffprobe: str | None) -> tuple[int, bool]:
     if m:
         h, mnt, sec = int(m.group(1)), int(m.group(2)), float(m.group(3))
         dur_us = int((h * 3600 + mnt * 60 + sec) * SECOND_US)
-    return dur_us, bool(_AUDIO_RE.search(err))
+    rotation = 0
+    mt = _ROTATE_TAG_RE.search(err)
+    md = _DISPLAYMATRIX_RE.search(err)
+    if mt:
+        rotation = _norm_rotation(float(mt.group(1)))
+    elif md:
+        rotation = _norm_rotation(-float(md.group(1)))
+    return dur_us, bool(_AUDIO_RE.search(err)), rotation
 
 
 def build_catalog(media_dir: Path, ffmpeg: str, ffprobe: str | None) -> list[CatalogAsset]:
@@ -79,10 +118,11 @@ def build_catalog(media_dir: Path, ffmpeg: str, ffprobe: str | None) -> list[Cat
             continue
         if path.name.startswith("._") or "__MACOSX" in path.parts:
             continue
-        dur_us, has_audio = _probe(path, ffmpeg, ffprobe)
+        dur_us, has_audio, rotation = _probe(path, ffmpeg, ffprobe)
         if dur_us > 0:
             assets.append(CatalogAsset(id=f"asset_{len(assets)}", path=path,
-                                       duration_us=dur_us, has_audio=has_audio))
+                                       duration_us=dur_us, has_audio=has_audio,
+                                       rotation=rotation))
     return assets
 
 
@@ -287,6 +327,7 @@ def autocreate(
                                captions=captions, max_clips=max_clips, analyses=analyses)
     asset_paths = {a.id: a.path for a in catalog}
     has_audio = {a.id: a.has_audio for a in catalog}
+    rotations = {a.id: a.rotation for a in catalog}
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Persist the plan + catalog + light analyses so post-render editing (clip
@@ -296,7 +337,7 @@ def autocreate(
 
     return _render_candidates(plan, asset_paths, has_audio, out_dir, ff,
                               music=music, logo=logo, voice_led=voice_led,
-                              make_my_video=make_my_video)
+                              make_my_video=make_my_video, rotations=rotations)
 
 
 def _render_candidates(
@@ -310,12 +351,14 @@ def _render_candidates(
     logo: Path | None,
     voice_led: bool,
     make_my_video: bool,
+    rotations: dict[str, int] | None = None,
 ) -> list[AutoCreateResult]:
     """Build Clean/Enhanced/Bold graphs from a plan and render them to MP4s."""
     from .render.graph import Outro
 
     outro = Outro(logo_path=logo) if logo is not None else None
-    candidates = build_candidates(plan, asset_paths, asset_has_audio=has_audio)
+    candidates = build_candidates(plan, asset_paths, asset_has_audio=has_audio,
+                                  asset_rotations=rotations)
     for cand in candidates:
         # Attach the soundtrack + branded ending to every candidate.
         if music is not None:
@@ -361,7 +404,8 @@ def _persist_edit_state(out_dir: Path, plan: EditPlan, catalog: list[CatalogAsse
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "plan.json").write_text(plan.model_dump_json(indent=2), "utf-8")
     catalog_rows = [{"id": a.id, "path": str(a.path), "name": a.path.name,
-                     "duration_us": a.duration_us, "has_audio": a.has_audio}
+                     "duration_us": a.duration_us, "has_audio": a.has_audio,
+                     "rotation": a.rotation}
                     for a in catalog]
     (out_dir / "catalog.json").write_text(json.dumps(catalog_rows, indent=2), "utf-8")
     an_rows = {aid: {"score": float(getattr(an, "score", 0.0)),
@@ -385,7 +429,8 @@ def load_edit_state(out_dir: Path) -> tuple[EditPlan, list[CatalogAsset], dict, 
     plan = EditPlan.model_validate_json(plan_path.read_text("utf-8"))
     rows = json.loads(catalog_path.read_text("utf-8"))
     catalog = [CatalogAsset(id=r["id"], path=Path(r["path"]),
-                            duration_us=int(r["duration_us"]), has_audio=bool(r["has_audio"]))
+                            duration_us=int(r["duration_us"]), has_audio=bool(r["has_audio"]),
+                            rotation=int(r.get("rotation", 0)))
                for r in rows]
     analyses: dict = {}
     an_path = out_dir / "analyses.json"
@@ -412,11 +457,12 @@ def rerender_from_plan(out_dir: Path, *, make_my_video: bool = False,
     plan, catalog, _analyses, ctx = loaded
     asset_paths = {a.id: a.path for a in catalog}
     has_audio = {a.id: a.has_audio for a in catalog}
+    rotations = {a.id: a.rotation for a in catalog}
     music = Path(ctx["music_path"]) if ctx.get("music_path") else None
     logo = Path(ctx["logo_path"]) if ctx.get("logo_path") else None
     return _render_candidates(plan, asset_paths, has_audio, out_dir, ff,
                               music=music, logo=logo, voice_led=bool(ctx.get("voice_led")),
-                              make_my_video=make_my_video)
+                              make_my_video=make_my_video, rotations=rotations)
 
 
 def main(argv: list[str] | None = None) -> int:

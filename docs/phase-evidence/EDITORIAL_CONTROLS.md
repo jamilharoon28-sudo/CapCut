@@ -67,4 +67,27 @@ pipeline.
 - The "Review 3 versions" (`autocreate`) endpoint now accepts a `.zip` of clips,
   matching `make-my-video`, the CLI, and preflight.
 - The macOS folder picker now allows selecting a `.zip` of clips as well as a
-  folder (`.mov` clips inside a chosen folder were always supported by the engine).
+  folder.
+
+## Wide-format & real-world footage robustness
+
+Prompted by real `.mov` footage failing to render:
+
+- **Many more containers accepted.** `VIDEO_EXTS` expanded from 5 to ~25
+  (`.webm`, `.mts`/`.m2ts`, `.3gp`, `.wmv`, `.flv`, `.mpg`, `.ts`, `.mxf`, …).
+- **Sturdier probing.** `_probe` now reads structured ffprobe JSON, falling back
+  from format duration to the video-stream duration, so more files yield a usable
+  duration instead of being silently dropped.
+- **Rotation baked in correctly.** Phone `.mov` clips store portrait video as
+  landscape + a rotate flag; under `-filter_complex` FFmpeg does **not**
+  auto-apply it, which produced sideways/zoomed frames. Coach now probes the
+  rotation (rotate tag or display-matrix), passes `-noautorotate` per input for
+  version-stable behaviour, and prepends the matching `transpose` so clips come
+  out upright before scale/crop. Rotation is persisted so swaps/re-renders keep it.
+- **Real errors surface.** The job payload now carries `error_detail`, and the
+  Create error screen shows a "Technical details" disclosure with the actual
+  FFmpeg message — so a genuine failure is diagnosable instead of a generic note.
+- Tests: `test_video_formats.py` (format breadth + rotation normalisation) and a
+  `test_render.py` case asserting rotated clips get `transpose` + `-noautorotate`.
+  End-to-end rendering of real rotated `.mov` remains **BLOCKED BY EVIDENCE**
+  until run on the Mac with FFmpeg.

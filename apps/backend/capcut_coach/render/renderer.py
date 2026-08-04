@@ -43,6 +43,18 @@ def _resolve_ffmpeg(ffmpeg: str | None) -> str:
     return found
 
 
+def _transpose_chain(rotation: int) -> str:
+    """FFmpeg transpose steps to bake in a clockwise display rotation (trailing ',')."""
+    r = int(rotation) % 360
+    if r == 90:
+        return "transpose=1,"
+    if r == 270:
+        return "transpose=2,"
+    if r == 180:
+        return "transpose=1,transpose=1,"
+    return ""
+
+
 def build_command(
     graph: RenderGraph,
     output_path: Path,
@@ -64,15 +76,21 @@ def build_command(
 
     idx = 0
     for clip in graph.clips:
-        # Input-level trim (fast seek) for each segment.
-        inputs += ["-ss", f"{clip.source_start_s:.3f}", "-t", f"{clip.duration_s:.3f}",
+        # Input-level trim (fast seek) for each segment. ``-noautorotate`` makes
+        # rotation deterministic across FFmpeg versions: we bake in the display
+        # rotation ourselves (below) so phone clips with a rotate flag come out
+        # upright instead of sideways or double-rotated.
+        inputs += ["-noautorotate",
+                   "-ss", f"{clip.source_start_s:.3f}", "-t", f"{clip.duration_s:.3f}",
                    "-i", str(clip.asset_path)]
         vlabel = f"v{idx}"
         # Subject reframe: shift the crop window horizontally by crop_x_norm.
         k = max(-1.0, min(1.0, clip.crop_x_norm))
         crop_x = f"(in_w-{cw})/2*(1+{k:.3f})" if abs(k) > 1e-3 else f"(in_w-{cw})/2"
+        # Bake in display rotation first so scale/crop see upright frames.
+        rot = _transpose_chain(clip.rotation)
         vchain = (
-            f"[{idx}:v]scale={cw}:{ch}:force_original_aspect_ratio=increase,"
+            f"[{idx}:v]{rot}scale={cw}:{ch}:force_original_aspect_ratio=increase,"
             f"crop={cw}:{ch}:{crop_x}:(in_h-{ch})/2,setsar=1,fps={fps}"
         )
         if (style.contrast, style.brightness, style.saturation) != (1.0, 0.0, 1.0):

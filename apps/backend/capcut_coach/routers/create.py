@@ -162,9 +162,11 @@ async def make_my_video(pid: str, body: AutoCreateBody, request: Request) -> dic
                     record_approval(state.layout.db_path, pid, best.candidate_name,
                                     auto_saved=True)
                     state.projects.update(pid, step="review", status="approved")
+            detail = "" if ok else next((r.detail for r in results if not r.ok), "")
             state.jobs.transition(job.id, JobState.SUCCEEDED if ok else JobState.FAILED,
                                   stage="done" if ok else "render_error", percent=100,
-                                  error_code=None if ok else "render_failed")
+                                  error_code=None if ok else "render_failed",
+                                  error_detail=detail[:400] or None)
         except Exception as e:
             state.jobs.transition(job.id, JobState.FAILED, error_code="autopilot_error",
                                   error_detail=str(e)[:400])

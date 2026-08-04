@@ -31,7 +31,7 @@ export function CreateFlow({ onDone }: { onDone: () => void }) {
 
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [checking, setChecking] = useState(false);
-  const [error, setError] = useState<{ title: string; body: string } | null>(null);
+  const [error, setError] = useState<{ title: string; body: string; detail?: string | null } | null>(null);
 
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [selected, setSelected] = useState<string>("enhanced");
@@ -114,8 +114,14 @@ export function CreateFlow({ onDone }: { onDone: () => void }) {
           setPhase("review");
         } else if (j.state === "failed") {
           window.clearInterval(poll.current!); poll.current = null;
-          setError({ title: "The video couldn't be made",
-            body: "Coach couldn't read usable clips in that folder. Your originals are untouched — try a different folder." });
+          const noClips = j.error_code === "autocreate_error" || j.error_code === "autopilot_error";
+          setError({
+            title: "The video couldn't be made",
+            body: noClips
+              ? "Coach couldn't find usable clips in that folder. Your originals are untouched — try a different folder."
+              : "Something went wrong while rendering. Your originals are untouched — you can try again.",
+            detail: j.error_detail ?? null,
+          });
           setPhase("error");
         }
       } catch (e) {
@@ -308,6 +314,14 @@ export function CreateFlow({ onDone }: { onDone: () => void }) {
         <EmptyState icon="alert" title={error?.title ?? "Something went wrong"}
           body={<>{error?.body}<br /><span className="small">Your original footage is safe and unchanged.</span></>}
           action={<Button variant="primary" onClick={() => setPhase("form")}>Try again</Button>} />
+        {error?.detail && (
+          <details className="card" style={{ marginTop: 16 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 600 }}>Technical details</summary>
+            <pre className="small" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: "10px 0 0" }}>
+              {error.detail}
+            </pre>
+          </details>
+        )}
       </div>
     );
   }

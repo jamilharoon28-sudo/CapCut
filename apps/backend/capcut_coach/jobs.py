@@ -96,6 +96,7 @@ class Job:
             "max_attempts": self.max_attempts,
             "cancel_requested": self.cancel_requested,
             "error_code": self.error_code,
+            "error_detail": self.error_detail,
             "output_artifact_ids": self.output_artifact_ids,
         }
 

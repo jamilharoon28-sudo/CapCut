@@ -7,7 +7,8 @@ export type Project = {
 export type DoctorCheck = { ok: boolean; detail?: string; [k: string]: unknown };
 export type Candidate = { name: string; file: string; ok: boolean; url: string; detail: string;
   qc?: { code: string; severity: string; message: string }[] };
-export type Job = { id: string; state: string; stage: string | null; percent: number | null };
+export type Job = { id: string; state: string; stage: string | null; percent: number | null;
+  error_code?: string | null; error_detail?: string | null };
 export type Request = {
   type: string; what_needed: string; why: string; recommended_action: string;
   fallback: string; quality_impact: string; blocking: boolean; recording_direction: string | null;

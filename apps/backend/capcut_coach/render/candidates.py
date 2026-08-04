@@ -55,13 +55,15 @@ def build_candidates(
     asset_paths: dict[str, Path],
     *,
     asset_has_audio: dict[str, bool] | None = None,
+    asset_rotations: dict[str, int] | None = None,
     styles: tuple[RenderStyle, ...] = (CLEAN, ENHANCED, BOLD),
 ) -> list[Candidate]:
     candidates: list[Candidate] = []
     for style in styles:
         source_plan = _bold_plan(plan) if style.name == "bold" else plan
         graph = graph_from_edit_plan(
-            source_plan, asset_paths, style=style, asset_has_audio=asset_has_audio
+            source_plan, asset_paths, style=style, asset_has_audio=asset_has_audio,
+            asset_rotations=asset_rotations,
         )
         candidates.append(
             Candidate(

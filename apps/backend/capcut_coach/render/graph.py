@@ -56,6 +56,7 @@ class RenderClip:
     role: str = "point"
     crop_x_norm: float = 0.0   # subject reframe: -1 left .. 0 centre .. +1 right
     ken_burns: bool = False    # gentle push-in for life on static shots
+    rotation: int = 0          # display rotation baked in (0/90/180/270 clockwise)
     provenance: dict = field(default_factory=dict)
 
     @property
@@ -112,9 +113,11 @@ def graph_from_edit_plan(
     *,
     style: RenderStyle,
     asset_has_audio: dict[str, bool] | None = None,
+    asset_rotations: dict[str, int] | None = None,
 ) -> RenderGraph:
     """Compile an EditPlan (+ media catalog) into a renderable graph."""
     asset_has_audio = asset_has_audio or {}
+    asset_rotations = asset_rotations or {}
     clips: list[RenderClip] = []
     for seg in sorted(plan.segments, key=lambda s: s.timeline_start_us):
         path = asset_paths.get(seg.asset_id)
@@ -130,6 +133,7 @@ def graph_from_edit_plan(
                 role=seg.role,
                 crop_x_norm=float(seg.transform.x),   # reframe offset carried in transform.x
                 ken_burns=style.ken_burns,
+                rotation=int(asset_rotations.get(seg.asset_id, 0)),
                 provenance={"segment_id": seg.id, "reason": seg.reason,
                             "confidence": seg.confidence},
             )
