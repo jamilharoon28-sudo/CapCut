@@ -24,6 +24,11 @@ fi
 
 # 2) Build the CLI (cmake is the current path; falls back to make)
 cd "$build_dir"
+# whisper.cpp builds with CMake; install it via Homebrew if it is missing.
+if ! command -v cmake >/dev/null 2>&1 && command -v brew >/dev/null 2>&1; then
+  echo "Installing cmake (needed to build whisper.cpp)…"
+  brew install cmake
+fi
 if command -v cmake >/dev/null 2>&1; then
   cmake -B build -DWHISPER_COREML="$([[ "$(uname -s)" == "Darwin" ]] && echo ON || echo OFF)" >/dev/null
   cmake --build build --config Release -j
