@@ -108,6 +108,59 @@ async def start_autocreate(pid: str, body: AutoCreateBody, request: Request) -> 
     return {"job_id": job.id}
 
 
+class PreflightBody(BaseModel):
+    media_dir: str
+    captions: list[str] | None = None
+    target_seconds: float = Field(default=20.0, ge=3, le=180)
+    music_path: str | None = None
+    logo_path: str | None = None
+
+
+@router.post("/projects/{pid}/preflight")
+async def preflight(pid: str, body: PreflightBody, request: Request) -> dict:
+    """Inspect sources and return a readiness report BEFORE rendering (doc 19)."""
+    from ..autocreate import _extract_zip_of_media, build_catalog
+    from ..preflight import run_preflight
+    from ..toolpaths import ffmpeg_path, ffprobe_path
+
+    state = request.app.state.coach
+    if not state.projects.get(pid):
+        raise HTTPException(404, {"code": "not_found", "message": "Project not found."})
+    ff = ffmpeg_path()
+    if not ff:
+        raise HTTPException(400, {"code": "no_ffmpeg", "message": "FFmpeg isn't installed yet."})
+
+    raw = Path(body.media_dir).expanduser().resolve(strict=False)
+    if raw.is_file() and raw.suffix.lower() == ".zip":
+        raw = _extract_zip_of_media(raw)
+    if is_cloud_path(raw) or not raw.is_dir():
+        raise HTTPException(400, {"code": "bad_folder",
+                                  "message": "That folder couldn't be used."})
+
+    catalog = build_catalog(raw, ff, ffprobe_path())
+    # Light visual analysis for quality signals (best-effort, capped for speed).
+    analyses: dict = {}
+    try:
+        from ..analysis.visual import analyse_clip, cv2_available
+        if cv2_available():
+            for a in catalog[:12]:
+                try:
+                    analyses[a.id] = analyse_clip(a.path, a.duration_us, ff)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    report = run_preflight(
+        catalog, script_beats=body.captions, analyses=analyses,
+        target_seconds=body.target_seconds,
+        music_present=bool(body.music_path), logo_present=bool(body.logo_path),
+    )
+    data = report.model_dump()
+    data["headline"] = report.headline
+    return data
+
+
 @router.get("/projects/{pid}/candidates")
 async def list_candidates(pid: str, request: Request) -> dict:
     out_dir = _candidates_dir(request, pid)

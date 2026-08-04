@@ -61,4 +61,34 @@ export const api = {
     }),
   job: (id: string) => req<Job>(`/jobs/${id}`),
   candidates: (pid: string) => req<{ candidates: Candidate[] }>(`/projects/${pid}/candidates`),
+  preflight: (
+    pid: string, mediaDir: string,
+    opts?: { captions?: string[]; targetSeconds?: number; musicPath?: string; logoPath?: string },
+  ) =>
+    req<Readiness>(`/projects/${pid}/preflight`, {
+      method: "POST",
+      body: JSON.stringify({
+        media_dir: mediaDir, captions: opts?.captions, target_seconds: opts?.targetSeconds,
+        music_path: opts?.musicPath || null, logo_path: opts?.logoPath || null,
+      }),
+    }),
+};
+
+export type Request = {
+  type: string;
+  what_needed: string;
+  why: string;
+  recommended_action: string;
+  fallback: string;
+  quality_impact: string;
+  blocking: boolean;
+  recording_direction: string | null;
+};
+export type Readiness = {
+  status: "READY" | "READY_WITH_SUGGESTIONS" | "NEEDS_HELP";
+  headline: string;
+  required_resolved: number;
+  required_total: number;
+  blocking_requests: Request[];
+  suggestions: Request[];
 };

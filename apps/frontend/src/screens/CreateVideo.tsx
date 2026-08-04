@@ -1,7 +1,43 @@
 import { useEffect, useRef, useState } from "react";
 
-import { api, type Candidate } from "../api";
+import { api, type Candidate, type Readiness, type Request } from "../api";
 import { Loading, StateCard } from "../components/States";
+
+function RequestCardView({ r }: { r: Request }) {
+  const tone = r.blocking ? "var(--danger)" : "var(--warning)";
+  return (
+    <div className="card" style={{ borderLeft: `4px solid ${tone}`, marginBottom: 10 }}>
+      <strong>{r.what_needed}</strong>
+      <p className="muted" style={{ margin: "4px 0" }}>{r.why}</p>
+      {r.recording_direction && (
+        <p style={{ margin: "4px 0", fontSize: 13 }}>🎬 {r.recording_direction}</p>
+      )}
+      <div style={{ fontSize: 13, color: "var(--text-2)" }}>
+        <div>✅ <b>Recommended:</b> {r.recommended_action}</div>
+        <div>↩︎ <b>Or:</b> {r.fallback}</div>
+        <div>⚠︎ <b>Without it:</b> {r.quality_impact}</div>
+      </div>
+    </div>
+  );
+}
+
+function ReadinessPanel({ r }: { r: Readiness }) {
+  const tone =
+    r.status === "READY" ? "success" : r.status === "NEEDS_HELP" ? "danger" : "warning";
+  const icon = r.status === "READY" ? "✅" : r.status === "NEEDS_HELP" ? "🙋" : "💡";
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <StateCard
+        icon={icon}
+        tone={tone as "success" | "warning" | "danger"}
+        title={r.headline}
+        detail={`${r.required_resolved} of ${r.required_total} essentials ready`}
+      />
+      {r.blocking_requests.map((rq, i) => <RequestCardView key={`b${i}`} r={rq} />)}
+      {r.suggestions.map((rq, i) => <RequestCardView key={`s${i}`} r={rq} />)}
+    </div>
+  );
+}
 
 type Phase = "form" | "rendering" | "review" | "error";
 
@@ -17,6 +53,8 @@ export function CreateVideo() {
   const [musicPath, setMusicPath] = useState("");
   const [logoPath, setLogoPath] = useState("");
   const [captions, setCaptions] = useState("");
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
+  const [checking, setChecking] = useState(false);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [chosen, setChosen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -224,10 +262,36 @@ export function CreateVideo() {
                      font: "inherit" }}
           />
         </label>
-        <div>
+        {readiness && <ReadinessPanel r={readiness} />}
+        <div style={{ display: "flex", gap: 12 }}>
+          <button onClick={check} disabled={checking}>
+            {checking ? "Checking…" : "Check what I need"}
+          </button>
           <button className="primary" onClick={start}>Create my videos</button>
         </div>
       </div>
     </section>
   );
+
+  async function check() {
+    if (!folder.trim()) { setError("Paste a folder path first."); return; }
+    setChecking(true);
+    setError(null);
+    try {
+      const capLines = captions.split("\n").map((s) => s.trim()).filter(Boolean);
+      const r = await api.createProject("New video").then((p) =>
+        api.preflight(p.id, folder.trim(), {
+          captions: capLines.length ? capLines : undefined,
+          targetSeconds: seconds,
+          musicPath: musicPath.trim() || undefined,
+          logoPath: logoPath.trim() || undefined,
+        }),
+      );
+      setReadiness(r);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setChecking(false);
+    }
+  }
 }
